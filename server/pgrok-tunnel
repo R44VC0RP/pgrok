@@ -93,64 +93,49 @@ def _make_route(subdomain, port):
     }
 
 
-def _ensure_routes_array():
-    """Ensure the routes array exists in Caddy config. Create it if missing."""
+def _get_routes():
+    """Get current routes from Caddy, returning empty list if none exist."""
+    req = urllib.request.Request(
+        f"{CADDY_API}/config/apps/http/servers/srv0/routes",
+        method="GET",
+    )
     try:
-        req = urllib.request.Request(
-            f"{CADDY_API}/config/apps/http/servers/srv0/routes",
-            method="GET",
-        )
-        urllib.request.urlopen(req)
-    except (urllib.error.HTTPError, urllib.error.URLError):
-        # Routes array doesn't exist — initialize it as empty array
-        req = urllib.request.Request(
-            f"{CADDY_API}/config/apps/http/servers/srv0/routes",
-            data=json.dumps([]).encode(),
-            headers={"Content-Type": "application/json"},
-            method="PUT",
-        )
-        try:
-            urllib.request.urlopen(req)
-        except Exception:
-            pass  # Will fail on the actual add_route if still broken
+        resp = urllib.request.urlopen(req)
+        data = json.loads(resp.read().decode())
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _put_routes(routes):
+    """Replace the entire routes array in Caddy config."""
+    req = urllib.request.Request(
+        f"{CADDY_API}/config/apps/http/servers/srv0/routes",
+        data=json.dumps(routes).encode(),
+        headers={"Content-Type": "application/json"},
+        method="PUT",
+    )
+    urllib.request.urlopen(req)
 
 
 def add_route(subdomain, port):
     """Add a reverse proxy route to Caddy via its admin API."""
     route = _make_route(subdomain, port)
-    data = json.dumps(route).encode()
 
-    req = urllib.request.Request(
-        f"{CADDY_API}/config/apps/http/servers/srv0/routes",
-        data=data,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
+    # Get existing routes, append ours, and PUT the whole array.
+    # This avoids issues with POST to a null/missing routes array.
+    routes = _get_routes()
+
+    # Remove any existing route with the same ID (re-connect case)
+    routes = [r for r in routes if r.get("@id") != f"pgrok-{subdomain}"]
+    routes.append(route)
 
     try:
-        urllib.request.urlopen(req)
+        _put_routes(routes)
     except urllib.error.HTTPError as e:
         body = e.read().decode() if e.fp else ""
-        # If routes array doesn't exist yet, create it and retry
-        if e.code == 500 and "RouteList" in body:
-            _ensure_routes_array()
-            # Retry the add
-            req2 = urllib.request.Request(
-                f"{CADDY_API}/config/apps/http/servers/srv0/routes",
-                data=data,
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            try:
-                urllib.request.urlopen(req2)
-                return
-            except urllib.error.HTTPError as e2:
-                body2 = e2.read().decode() if e2.fp else ""
-                print(f"Error: Failed to add Caddy route: {e2.code} {body2}", file=sys.stderr)
-                sys.exit(1)
-        else:
-            print(f"Error: Failed to add Caddy route: {e.code} {body}", file=sys.stderr)
-            sys.exit(1)
+        print(f"Error: Failed to add Caddy route: {e.code} {body}", file=sys.stderr)
+        sys.exit(1)
     except urllib.error.URLError as e:
         print(f"Error: Cannot reach Caddy API at {CADDY_API}: {e.reason}", file=sys.stderr)
         print("Is Caddy running?", file=sys.stderr)

@@ -98,13 +98,6 @@ if ! echo "$LOCAL_PORT" | grep -qE '^[0-9]+$' || [ "$LOCAL_PORT" -lt 1 ] || [ "$
     exit 1
 fi
 
-# --- Check if local port is listening ---
-if ! (echo >/dev/tcp/127.0.0.1/"$LOCAL_PORT") 2>/dev/null; then
-    echo -e "${YELLOW}Warning:${NC} Nothing listening on localhost:${LOCAL_PORT}"
-    echo "  Make sure your local service is running before sending traffic."
-    echo ""
-fi
-
 # --- Compute deterministic remote port from subdomain ---
 # This avoids collisions for different subdomain names
 HASH=$(echo -n "$SUBDOMAIN" | cksum | cut -d' ' -f1)
@@ -115,8 +108,8 @@ SSH_OPTS=(
     -tt
     -o ServerAliveInterval=30
     -o ServerAliveCountMax=3
-    -o ExitOnForwardFailure=yes
     -o ConnectTimeout=10
+    -o LogLevel=ERROR
 )
 
 if [ -n "$PGROK_SSH_KEY" ]; then

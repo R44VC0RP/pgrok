@@ -178,8 +178,6 @@ https:// {
 	tls {
 		on_demand
 	}
-
-	respond "No active tunnel on {host}" 502
 }
 CADDYEOF
     success "Generated Caddyfile (on-demand TLS)"

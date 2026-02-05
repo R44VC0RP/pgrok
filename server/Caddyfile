@@ -1,17 +1,15 @@
 {
 	# On-demand TLS: provision certs via HTTP-01 as requests arrive
-	# The "ask" endpoint prevents abuse — only issues certs for active tunnels
+	# The "ask" endpoint prevents abuse — only issues certs for *.yourdomain.com
 	on_demand_tls {
 		ask http://localhost:9123/check
 	}
 }
 
 # Catch-all HTTPS site — handles any domain pointing to this server
+# Tunnel routes are added dynamically via the admin API by pgrok-tunnel
 https:// {
 	tls {
 		on_demand
 	}
-
-	# Default response when no tunnel route matches
-	respond "No active tunnel on {host}" 502
 }

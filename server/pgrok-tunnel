@@ -107,13 +107,26 @@ def _get_routes():
         return []
 
 
-def _put_routes(routes):
+def _set_routes(routes):
     """Replace the entire routes array in Caddy config."""
+    data = json.dumps(routes).encode()
+    headers = {"Content-Type": "application/json"}
+
+    # Try PATCH first (replaces existing key)
+    try:
+        req = urllib.request.Request(
+            f"{CADDY_API}/config/apps/http/servers/srv0/routes",
+            data=data, headers=headers, method="PATCH",
+        )
+        urllib.request.urlopen(req)
+        return
+    except urllib.error.HTTPError:
+        pass
+
+    # Fall back to PUT (creates new key if missing)
     req = urllib.request.Request(
         f"{CADDY_API}/config/apps/http/servers/srv0/routes",
-        data=json.dumps(routes).encode(),
-        headers={"Content-Type": "application/json"},
-        method="PUT",
+        data=data, headers=headers, method="PUT",
     )
     urllib.request.urlopen(req)
 
@@ -131,7 +144,7 @@ def add_route(subdomain, port):
     routes.append(route)
 
     try:
-        _put_routes(routes)
+        _set_routes(routes)
     except urllib.error.HTTPError as e:
         body = e.read().decode() if e.fp else ""
         print(f"Error: Failed to add Caddy route: {e.code} {body}", file=sys.stderr)

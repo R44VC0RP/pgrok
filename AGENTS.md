@@ -9,8 +9,9 @@
 ## Server (Caddy + Docker)
 
 - **`network_mode: host` is required** in `docker-compose.yml`. SSH tunnels bind to the host's `localhost`, which is unreachable from inside Docker's default bridge network. Without this, Caddy can see the route but can't reach the upstream.
-- **Caddy needs a custom build** for Vercel DNS support. The `Dockerfile` uses `xcaddy build --with github.com/caddy-dns/vercel` in a multi-stage build. The module isn't included in the official Caddy image.
-- **Vercel is a supported ACME DNS-01 provider** for both Caddy (`caddy-dns/vercel`) and Traefik (`lego` library, provider name `vercel`). This isn't well-documented — it was added to lego in v4.7.0 (April 2022). Env var: `VERCEL_API_TOKEN`.
+- **Caddy needs a custom build** for Cloudflare DNS support. The `Dockerfile` uses `xcaddy build --with github.com/caddy-dns/cloudflare` in a multi-stage build. The module isn't included in the official Caddy image.
+- **`caddy-dns/vercel` is broken and abandoned** (1 commit from 2021, never updated for `libdns` breaking API change). Do NOT use it. The `caddy-dns/cloudflare` module is actively maintained and is the correct choice. Env var: `CLOUDFLARE_API_TOKEN`.
+- **Cloudflare proxy (orange cloud) must be OFF** for the wildcard A record. Caddy handles TLS termination directly — if Cloudflare proxies, it breaks the SSL handshake since Caddy expects to terminate TLS itself.
 - The Caddy admin API endpoint for adding routes is `POST /config/apps/http/servers/srv0/routes`. The `srv0` server name is Caddy's default when configured via Caddyfile. Deleting by ID uses `DELETE /id/<route-id>`.
 
 ## Server Script (`server/pgrok-tunnel`)
@@ -33,4 +34,4 @@
 ## DNS
 
 - A single wildcard A record (`*.yourdomain.com → VPS_IP`) is all that's needed. No per-tunnel DNS API calls. Explicit DNS records for specific subdomains take precedence over the wildcard per standard DNS specificity rules.
-- The Vercel API token is only used for ACME DNS-01 challenges (creating/deleting `_acme-challenge` TXT records). It is NOT used at runtime for traffic routing.
+- The Cloudflare API token is only used for ACME DNS-01 challenges (creating/deleting `_acme-challenge` TXT records). It is NOT used at runtime for traffic routing.

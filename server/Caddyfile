@@ -1,13 +1,13 @@
 {
-	# Use Vercel DNS for ACME DNS-01 challenge (wildcard certs)
-	acme_dns vercel {env.VERCEL_API_TOKEN}
+	# Use Cloudflare DNS for ACME DNS-01 challenge (wildcard certs)
+	acme_dns cloudflare {env.CLOUDFLARE_API_TOKEN}
 }
 
 # Wildcard domain — Caddy provisions a single cert for *.yourdomain.com
 # Replace "yourdomain.com" with your actual domain
 *.yourdomain.com {
 	tls {
-		dns vercel {env.VERCEL_API_TOKEN}
+		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
 	}
 
 	# Default response when no tunnel is active for this subdomain

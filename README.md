@@ -24,7 +24,7 @@ Browser → https://myapp.yourdomain.com
        → localhost:4000
 ```
 
-**Caddy** on the VPS handles HTTPS with a wildcard certificate (Let's Encrypt + Vercel DNS).
+**Caddy** on the VPS handles HTTPS with a wildcard certificate (Let's Encrypt + Cloudflare DNS).
 **SSH reverse tunnels** carry traffic — no extra tunnel software.
 A small **Python script** on the server dynamically configures Caddy routes when tunnels connect/disconnect.
 
@@ -40,23 +40,25 @@ sudo ./setup.sh server
 
 The setup script will interactively ask for:
 - Your domain name
-- Vercel API token (for wildcard SSL)
+- Cloudflare API token (for wildcard SSL)
 - Your Mac's SSH public key
 
 It then automatically:
-- Builds a custom Caddy Docker image with Vercel DNS support
+- Builds a custom Caddy Docker image with Cloudflare DNS support
 - Generates the Caddyfile with your domain
 - Creates a `pgrok` SSH user with your key
 - Configures sshd for secure tunnel forwarding
 - Starts Caddy via Docker Compose
 
-### 2. DNS (Vercel dashboard)
+### 2. DNS (Cloudflare dashboard)
 
 The setup script will print the exact DNS record to add. It's just one wildcard A record:
 
-| Type | Name | Value |
-|------|------|-------|
-| A    | *    | `<your-vps-ip>` |
+| Type | Name | Value | Proxy |
+|------|------|-------|-------|
+| A    | *    | `<your-vps-ip>` | DNS only (grey cloud) |
+
+> **Note:** Disable Cloudflare's proxy (orange cloud) for the wildcard record. Caddy handles TLS directly.
 
 ### 3. Client (on your Mac)
 
@@ -99,7 +101,7 @@ Press `Ctrl+C` to stop. The route is cleaned up automatically.
 pgrok/
 ├── setup.sh                  # Interactive installer (server + client)
 ├── server/
-│   ├── Dockerfile            # Custom Caddy with Vercel DNS module
+│   ├── Dockerfile            # Custom Caddy with Cloudflare DNS module
 │   ├── docker-compose.yml    # Caddy container config
 │   ├── Caddyfile             # Template (setup.sh generates the real one)
 │   ├── .env.example          # Environment variables template
@@ -123,11 +125,11 @@ pgrok/
 - SSH key pair (`ssh-keygen` if you don't have one)
 
 **DNS:**
-- Domain with DNS managed by Vercel (for wildcard SSL)
+- Domain with DNS on Cloudflare (free tier works — for wildcard SSL via DNS-01 challenge)
 
 ## How SSL Works
 
-1. Caddy uses the DNS-01 challenge via Vercel's API to prove domain ownership
+1. Caddy uses the DNS-01 challenge via Cloudflare's API to prove domain ownership
 2. Let's Encrypt issues a single wildcard certificate for `*.yourdomain.com`
 3. Auto-renews every ~60 days
 4. Every tunnel subdomain gets HTTPS instantly — no per-tunnel cert provisioning
@@ -158,7 +160,7 @@ Files live in `/opt/pgrok/` after setup:
 
 | File | Purpose |
 |------|---------|
-| `.env` | Vercel API token |
+| `.env` | Cloudflare API token |
 | `Caddyfile` | Wildcard domain config |
 | `docker-compose.yml` | Caddy container |
 | `Dockerfile` | Custom Caddy build |
@@ -179,7 +181,7 @@ The tunnel script is at `/usr/local/bin/pgrok-tunnel`.
 **SSL certificate errors:**
 - Caddy may still be provisioning the wildcard cert (takes a minute on first start)
 - Check Caddy logs: `docker compose logs caddy` in `/opt/pgrok`
-- Verify Vercel API token has DNS permissions
+- Verify Cloudflare API token has Zone:DNS:Edit permissions
 
 **"Port not yet reachable" warning:**
 - Usually harmless — SSH tunnel takes a moment to establish

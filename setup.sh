@@ -127,11 +127,11 @@ setup_server() {
     prompt DOMAIN "Your domain (e.g. example.com)"
 
     echo ""
-    info "Vercel API token is needed for wildcard SSL certificates."
-    info "Create one at: https://vercel.com/account/tokens"
-    info "It needs DNS read/write permissions."
+    info "Cloudflare API token is needed for wildcard SSL certificates."
+    info "Create one at: https://dash.cloudflare.com/profile/api-tokens"
+    info "Use the 'Edit zone DNS' template, scoped to your domain's zone."
     echo ""
-    prompt_secret VERCEL_TOKEN "Vercel API token"
+    prompt_secret CF_TOKEN "Cloudflare API token"
 
     echo ""
     info "Your Mac's SSH public key is needed so the pgrok client can connect."
@@ -150,7 +150,7 @@ setup_server() {
     echo -e "  ${DIM}────────────────────────────────────${NC}"
     echo -e "  Domain:     ${CYAN}*.${DOMAIN}${NC}"
     echo -e "  VPS IP:     ${CYAN}${VPS_IP:-unknown}${NC}"
-    echo -e "  Vercel:     ${CYAN}(token set)${NC}"
+    echo -e "  Cloudflare: ${CYAN}(token set)${NC}"
     echo -e "  SSH key:    ${CYAN}${SSH_PUB_KEY:0:40}...${NC}"
     echo -e "  ${DIM}────────────────────────────────────${NC}"
     echo ""
@@ -177,12 +177,12 @@ setup_server() {
     # --- 3. Generate Caddyfile with actual domain ---
     cat > "${SERVER_DIR}/Caddyfile" << CADDYEOF
 {
-	acme_dns vercel {env.VERCEL_API_TOKEN}
+	acme_dns cloudflare {env.CLOUDFLARE_API_TOKEN}
 }
 
 *.${DOMAIN} {
 	tls {
-		dns vercel {env.VERCEL_API_TOKEN}
+		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
 	}
 
 	respond "No active tunnel on {host}" 502
@@ -192,10 +192,10 @@ CADDYEOF
 
     # --- 4. Write .env ---
     cat > "${SERVER_DIR}/.env" << ENVEOF
-VERCEL_API_TOKEN=${VERCEL_TOKEN}
+CLOUDFLARE_API_TOKEN=${CF_TOKEN}
 ENVEOF
     chmod 600 "${SERVER_DIR}/.env"
-    success "Wrote .env with Vercel token"
+    success "Wrote .env with Cloudflare token"
 
     # --- 5. Install pgrok-tunnel with correct domain ---
     TUNNEL_SCRIPT="/usr/local/bin/pgrok-tunnel"
@@ -275,11 +275,12 @@ SSHDEOF
     echo ""
     echo -e "  ${BOLD}One manual step remaining — add DNS record:${NC}"
     echo ""
-    echo -e "  In your Vercel dashboard (vercel.com/dashboard → Domains → ${DOMAIN}):"
+    echo -e "  In your Cloudflare dashboard (dash.cloudflare.com → ${DOMAIN} → DNS):"
     echo ""
     echo -e "    Type:  ${BOLD}A${NC}"
     echo -e "    Name:  ${BOLD}*${NC}"
     echo -e "    Value: ${BOLD}${VPS_IP:-<your-vps-ip>}${NC}"
+    echo -e "    Proxy: ${BOLD}DNS only (grey cloud)${NC}"
     echo ""
     echo -e "  Then run ${CYAN}./setup.sh client${NC} on your Mac."
     echo ""

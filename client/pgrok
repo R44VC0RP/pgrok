@@ -1,0 +1,161 @@
+#!/bin/bash
+set -euo pipefail
+
+# pgrok — Expose local ports to the internet via SSH tunnels
+#
+# Usage:
+#   pgrok <subdomain> <local-port>
+#   pgrok myapp 4000        → https://myapp.yourdomain.com → localhost:4000
+#   pgrok api 3000           → https://api.yourdomain.com → localhost:3000
+#
+# Configuration:
+#   Set defaults in ~/.pgrok/config (optional):
+#     PGROK_HOST=your-vps-ip
+#     PGROK_DOMAIN=yourdomain.com
+#     PGROK_USER=pgrok
+#     PGROK_SSH_KEY=~/.ssh/id_ed25519
+
+VERSION="0.1.0"
+
+# --- Colors ---
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m' # No Color
+
+# --- Defaults (override in ~/.pgrok/config) ---
+PGROK_HOST="${PGROK_HOST:-}"
+PGROK_DOMAIN="${PGROK_DOMAIN:-}"
+PGROK_USER="${PGROK_USER:-pgrok}"
+PGROK_SSH_KEY="${PGROK_SSH_KEY:-}"
+
+# --- Load config file ---
+CONFIG_FILE="${HOME}/.pgrok/config"
+if [ -f "$CONFIG_FILE" ]; then
+    # shellcheck source=/dev/null
+    source "$CONFIG_FILE"
+fi
+
+# --- Usage ---
+usage() {
+    echo -e "${BOLD}pgrok${NC} v${VERSION} — Expose local ports to the internet"
+    echo ""
+    echo -e "  ${BOLD}Usage:${NC}"
+    echo "    pgrok <subdomain> <local-port>"
+    echo ""
+    echo -e "  ${BOLD}Examples:${NC}"
+    echo "    pgrok myapp 4000        https://myapp.${PGROK_DOMAIN:-yourdomain.com} → localhost:4000"
+    echo "    pgrok api 3000          https://api.${PGROK_DOMAIN:-yourdomain.com} → localhost:3000"
+    echo ""
+    echo -e "  ${BOLD}Configuration:${NC}"
+    echo "    Create ~/.pgrok/config with:"
+    echo "      PGROK_HOST=your-vps-ip-or-hostname"
+    echo "      PGROK_DOMAIN=yourdomain.com"
+    echo "      PGROK_USER=pgrok"
+    echo "      PGROK_SSH_KEY=~/.ssh/id_ed25519  (optional)"
+    echo ""
+    exit 1
+}
+
+# --- Validate args ---
+if [ "${1:-}" = "--version" ] || [ "${1:-}" = "-v" ]; then
+    echo "pgrok v${VERSION}"
+    exit 0
+fi
+
+if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ] || [ $# -lt 2 ]; then
+    usage
+fi
+
+SUBDOMAIN="$1"
+LOCAL_PORT="$2"
+
+# --- Validate config ---
+if [ -z "$PGROK_HOST" ]; then
+    echo -e "${RED}Error:${NC} PGROK_HOST not set."
+    echo "Set it in ~/.pgrok/config or as an environment variable."
+    exit 1
+fi
+
+if [ -z "$PGROK_DOMAIN" ]; then
+    echo -e "${RED}Error:${NC} PGROK_DOMAIN not set."
+    echo "Set it in ~/.pgrok/config or as an environment variable."
+    exit 1
+fi
+
+# --- Validate subdomain ---
+if ! echo "$SUBDOMAIN" | grep -qE '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'; then
+    echo -e "${RED}Error:${NC} Invalid subdomain '${SUBDOMAIN}'"
+    echo "Must be lowercase alphanumeric and hyphens, 1-63 characters."
+    exit 1
+fi
+
+# --- Validate port ---
+if ! echo "$LOCAL_PORT" | grep -qE '^[0-9]+$' || [ "$LOCAL_PORT" -lt 1 ] || [ "$LOCAL_PORT" -gt 65535 ]; then
+    echo -e "${RED}Error:${NC} Invalid port '${LOCAL_PORT}'. Must be 1-65535."
+    exit 1
+fi
+
+# --- Check if local port is listening ---
+if ! (echo >/dev/tcp/127.0.0.1/"$LOCAL_PORT") 2>/dev/null; then
+    echo -e "${YELLOW}Warning:${NC} Nothing listening on localhost:${LOCAL_PORT}"
+    echo "  Make sure your local service is running before sending traffic."
+    echo ""
+fi
+
+# --- Compute deterministic remote port from subdomain ---
+# This avoids collisions for different subdomain names
+HASH=$(echo -n "$SUBDOMAIN" | cksum | cut -d' ' -f1)
+REMOTE_PORT=$((10000 + HASH % 50000))
+
+# --- Build SSH options ---
+SSH_OPTS=(
+    -tt
+    -o ServerAliveInterval=30
+    -o ServerAliveCountMax=3
+    -o ExitOnForwardFailure=yes
+    -o ConnectTimeout=10
+)
+
+if [ -n "$PGROK_SSH_KEY" ]; then
+    # Expand tilde
+    EXPANDED_KEY="${PGROK_SSH_KEY/#\~/$HOME}"
+    if [ -f "$EXPANDED_KEY" ]; then
+        SSH_OPTS+=(-i "$EXPANDED_KEY")
+    else
+        echo -e "${YELLOW}Warning:${NC} SSH key not found at ${PGROK_SSH_KEY}"
+    fi
+fi
+
+# --- Display info ---
+FULL_URL="https://${SUBDOMAIN}.${PGROK_DOMAIN}"
+
+echo ""
+echo -e "  ${BOLD}${GREEN}pgrok${NC}"
+echo ""
+echo -e "  ${CYAN}Tunnel:${NC}    ${FULL_URL}"
+echo -e "  ${CYAN}Forwards:${NC}  → localhost:${LOCAL_PORT}"
+echo ""
+echo -e "  Press ${BOLD}Ctrl+C${NC} to stop the tunnel."
+echo ""
+
+# --- Handle Ctrl+C gracefully ---
+cleanup() {
+    echo ""
+    echo -e "  ${YELLOW}Tunnel closed.${NC}"
+    exit 0
+}
+trap cleanup INT TERM
+
+# --- Start SSH tunnel ---
+ssh "${SSH_OPTS[@]}" \
+    -R "${REMOTE_PORT}:localhost:${LOCAL_PORT}" \
+    "${PGROK_USER}@${PGROK_HOST}" \
+    "/usr/local/bin/pgrok-tunnel ${SUBDOMAIN} ${REMOTE_PORT}"
+
+# If SSH exits unexpectedly
+echo ""
+echo -e "  ${RED}SSH connection lost.${NC}"
+exit 1

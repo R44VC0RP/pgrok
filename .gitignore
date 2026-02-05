@@ -1,0 +1,6 @@
+# Environment files with secrets
+server/.env
+.env
+
+# macOS
+.DS_Store

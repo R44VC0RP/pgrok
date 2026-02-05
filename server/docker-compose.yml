@@ -1,0 +1,15 @@
+services:
+  caddy:
+    build: .
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    environment:
+      - VERCEL_API_TOKEN=${VERCEL_API_TOKEN}
+
+volumes:
+  caddy_data:
+  caddy_config:

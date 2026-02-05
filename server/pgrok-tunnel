@@ -1,0 +1,174 @@
+#!/usr/bin/env python3
+"""
+pgrok-tunnel — Server-side tunnel controller for pgrok.
+
+Called via SSH from the pgrok client. Dynamically adds a Caddy reverse proxy
+route for the given subdomain, pointing to the SSH tunnel's local port.
+Removes the route when the SSH connection drops.
+
+Usage: pgrok-tunnel <subdomain> <port>
+"""
+
+import sys
+import os
+import json
+import signal
+import atexit
+import socket
+import re
+import urllib.request
+import urllib.error
+
+# --- Configuration ---
+# Override with environment variables if needed
+CADDY_API = os.environ.get("PGROK_CADDY_API", "http://localhost:2019")
+DOMAIN = os.environ.get("PGROK_DOMAIN", "yourdomain.com")
+
+# Allowed subdomain pattern: lowercase alphanumeric + hyphens, 1-63 chars
+SUBDOMAIN_PATTERN = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
+
+
+def validate_subdomain(subdomain):
+    """Validate subdomain is safe for DNS and Caddy config."""
+    if not SUBDOMAIN_PATTERN.match(subdomain):
+        print(f"Error: Invalid subdomain '{subdomain}'", file=sys.stderr)
+        print("Must be 1-63 chars, lowercase alphanumeric and hyphens only.", file=sys.stderr)
+        sys.exit(1)
+
+
+def validate_port(port_str):
+    """Validate port is a reasonable number."""
+    try:
+        port = int(port_str)
+        if not (1024 <= port <= 65535):
+            raise ValueError
+        return port
+    except ValueError:
+        print(f"Error: Invalid port '{port_str}'. Must be 1024-65535.", file=sys.stderr)
+        sys.exit(1)
+
+
+def check_port_available(port):
+    """Check if something is already listening on the port (the SSH tunnel)."""
+    # We actually want the port to be IN USE (by the SSH tunnel).
+    # Give SSH a moment to set up the tunnel before we check.
+    import time
+    time.sleep(0.5)
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(2)
+    try:
+        result = sock.connect_ex(("127.0.0.1", port))
+        sock.close()
+        if result != 0:
+            print(f"Warning: Port {port} not yet reachable. SSH tunnel may still be starting.", file=sys.stderr)
+    except Exception:
+        pass
+
+
+def add_route(subdomain, port):
+    """Add a reverse proxy route to Caddy via its admin API."""
+    host = f"{subdomain}.{DOMAIN}"
+    route = {
+        "@id": f"pgrok-{subdomain}",
+        "match": [{"host": [host]}],
+        "handle": [
+            {
+                "handler": "reverse_proxy",
+                "upstreams": [{"dial": f"localhost:{port}"}],
+                "transport": {
+                    "protocol": "http",
+                    "read_timeout": 0,  # No timeout for long-lived connections (WebSocket, SSE)
+                },
+                "headers": {
+                    "request": {
+                        "set": {
+                            "X-Forwarded-Host": [host],
+                            "X-Pgrok-Subdomain": [subdomain],
+                        }
+                    }
+                },
+            }
+        ],
+    }
+
+    data = json.dumps(route).encode()
+    req = urllib.request.Request(
+        f"{CADDY_API}/config/apps/http/servers/srv0/routes",
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    try:
+        urllib.request.urlopen(req)
+    except urllib.error.HTTPError as e:
+        body = e.read().decode() if e.fp else ""
+        print(f"Error: Failed to add Caddy route: {e.code} {body}", file=sys.stderr)
+        sys.exit(1)
+    except urllib.error.URLError as e:
+        print(f"Error: Cannot reach Caddy API at {CADDY_API}: {e.reason}", file=sys.stderr)
+        print("Is Caddy running?", file=sys.stderr)
+        sys.exit(1)
+
+
+def remove_route(subdomain):
+    """Remove the reverse proxy route from Caddy."""
+    req = urllib.request.Request(
+        f"{CADDY_API}/id/pgrok-{subdomain}",
+        method="DELETE",
+    )
+    try:
+        urllib.request.urlopen(req)
+    except Exception:
+        # Best-effort cleanup — don't fail on exit
+        pass
+
+
+def handle_signal(signum, frame):
+    """Handle termination signals gracefully."""
+    sys.exit(0)
+
+
+def main():
+    if len(sys.argv) != 3:
+        print("Usage: pgrok-tunnel <subdomain> <port>", file=sys.stderr)
+        sys.exit(1)
+
+    subdomain = sys.argv[1].lower()
+    port_str = sys.argv[2]
+
+    validate_subdomain(subdomain)
+    port = validate_port(port_str)
+
+    # Register cleanup before adding the route
+    atexit.register(remove_route, subdomain)
+    signal.signal(signal.SIGTERM, handle_signal)
+    signal.signal(signal.SIGHUP, handle_signal)
+    signal.signal(signal.SIGINT, handle_signal)
+
+    # Check that the SSH tunnel port is reachable
+    check_port_available(port)
+
+    # Add the Caddy route
+    add_route(subdomain, port)
+
+    url = f"https://{subdomain}.{DOMAIN}"
+    print(f"pgrok tunnel active: {url}")
+    print(f"  Forwarding to localhost:{port}")
+    sys.stdout.flush()
+
+    # Block until the SSH connection drops (stdin closes)
+    try:
+        while True:
+            data = sys.stdin.read(1)
+            if not data:
+                break
+    except (EOFError, KeyboardInterrupt):
+        pass
+
+    # atexit will call remove_route
+
+
+if __name__ == "__main__":
+    main()

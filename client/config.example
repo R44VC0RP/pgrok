@@ -1,0 +1,14 @@
+# pgrok client configuration
+# Copy this to ~/.pgrok/config and fill in your values.
+
+# VPS hostname or IP address (required)
+PGROK_HOST=your-vps-ip-or-hostname
+
+# Your domain (required) — should match the Caddyfile on the server
+PGROK_DOMAIN=yourdomain.com
+
+# SSH user on the VPS (default: pgrok)
+PGROK_USER=pgrok
+
+# Path to SSH private key (optional — uses default SSH key if not set)
+# PGROK_SSH_KEY=~/.ssh/id_ed25519

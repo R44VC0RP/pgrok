@@ -1,15 +1,17 @@
 {
-	# Use Cloudflare DNS for ACME DNS-01 challenge (wildcard certs)
-	acme_dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+	# On-demand TLS: provision certs via HTTP-01 as requests arrive
+	# The "ask" endpoint prevents abuse — only issues certs for active tunnels
+	on_demand_tls {
+		ask http://localhost:9123/check
+	}
 }
 
-# Wildcard domain — Caddy provisions a single cert for *.yourdomain.com
-# Replace "yourdomain.com" with your actual domain
-*.yourdomain.com {
+# Catch-all HTTPS site — handles any domain pointing to this server
+https:// {
 	tls {
-		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+		on_demand
 	}
 
-	# Default response when no tunnel is active for this subdomain
+	# Default response when no tunnel route matches
 	respond "No active tunnel on {host}" 502
 }

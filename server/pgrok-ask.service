@@ -1,0 +1,13 @@
+[Unit]
+Description=pgrok certificate validation endpoint
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/pgrok-ask
+Environment=PGROK_DOMAIN=yourdomain.com
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

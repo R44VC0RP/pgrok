@@ -1,0 +1,55 @@
+#!/usr/bin/env python3
+"""
+pgrok-ask — Certificate validation endpoint for Caddy On-Demand TLS.
+
+Caddy calls GET http://localhost:9123/check?domain=<hostname> before issuing
+a certificate. This server responds 200 if the domain matches *.PGROK_DOMAIN
+(allowing the cert), or 403 otherwise (blocking it).
+
+This prevents abuse — without it, anyone could point a domain at the VPS
+and exhaust Let's Encrypt rate limits.
+
+Run as a systemd service or in the background: pgrok-ask &
+"""
+
+import os
+import sys
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
+
+DOMAIN = os.environ.get("PGROK_DOMAIN", "yourdomain.com")
+LISTEN_PORT = int(os.environ.get("PGROK_ASK_PORT", "9123"))
+
+
+class AskHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        params = parse_qs(parsed.query)
+        domain = params.get("domain", [None])[0]
+
+        if domain and domain.endswith(f".{DOMAIN}"):
+            # Valid subdomain of our tunnel domain — allow cert
+            self.send_response(200)
+            self.end_headers()
+        else:
+            # Unknown domain — deny cert issuance
+            self.send_response(403)
+            self.end_headers()
+
+    def log_message(self, format, *args):
+        # Suppress noisy access logs
+        pass
+
+
+def main():
+    server = HTTPServer(("127.0.0.1", LISTEN_PORT), AskHandler)
+    print(f"pgrok-ask: listening on 127.0.0.1:{LISTEN_PORT} (domain: *.{DOMAIN})")
+    sys.stdout.flush()
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+
+
+if __name__ == "__main__":
+    main()

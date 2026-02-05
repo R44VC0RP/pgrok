@@ -127,13 +127,6 @@ setup_server() {
     prompt DOMAIN "Your domain (e.g. example.com)"
 
     echo ""
-    info "Cloudflare API token is needed for wildcard SSL certificates."
-    info "Create one at: https://dash.cloudflare.com/profile/api-tokens"
-    info "Use the 'Edit zone DNS' template, scoped to your domain's zone."
-    echo ""
-    prompt_secret CF_TOKEN "Cloudflare API token"
-
-    echo ""
     info "Your Mac's SSH public key is needed so the pgrok client can connect."
     info "Find it on your Mac with: cat ~/.ssh/id_ed25519.pub"
     echo ""
@@ -150,7 +143,6 @@ setup_server() {
     echo -e "  ${DIM}────────────────────────────────────${NC}"
     echo -e "  Domain:     ${CYAN}*.${DOMAIN}${NC}"
     echo -e "  VPS IP:     ${CYAN}${VPS_IP:-unknown}${NC}"
-    echo -e "  Cloudflare: ${CYAN}(token set)${NC}"
     echo -e "  SSH key:    ${CYAN}${SSH_PUB_KEY:0:40}...${NC}"
     echo -e "  ${DIM}────────────────────────────────────${NC}"
     echo ""
@@ -174,28 +166,35 @@ setup_server() {
     cp "${SCRIPT_DIR}/server/docker-compose.yml" "$SERVER_DIR/"
     success "Copied Docker files"
 
-    # --- 3. Generate Caddyfile with actual domain ---
-    cat > "${SERVER_DIR}/Caddyfile" << CADDYEOF
+    # --- 3. Generate Caddyfile ---
+    cat > "${SERVER_DIR}/Caddyfile" << 'CADDYEOF'
 {
-	acme_dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+	on_demand_tls {
+		ask http://localhost:9123/check
+	}
 }
 
-*.${DOMAIN} {
+https:// {
 	tls {
-		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+		on_demand
 	}
 
 	respond "No active tunnel on {host}" 502
 }
 CADDYEOF
-    success "Generated Caddyfile for *.${DOMAIN}"
+    success "Generated Caddyfile (on-demand TLS)"
 
-    # --- 4. Write .env ---
-    cat > "${SERVER_DIR}/.env" << ENVEOF
-CLOUDFLARE_API_TOKEN=${CF_TOKEN}
-ENVEOF
-    chmod 600 "${SERVER_DIR}/.env"
-    success "Wrote .env with Cloudflare token"
+    # --- 4. Install pgrok-ask service ---
+    ASK_SCRIPT="/usr/local/bin/pgrok-ask"
+    sed "s/yourdomain\.com/${DOMAIN}/g" "${SCRIPT_DIR}/server/pgrok-ask" > "$ASK_SCRIPT"
+    chmod +x "$ASK_SCRIPT"
+
+    # Create systemd service for pgrok-ask
+    sed "s/yourdomain\.com/${DOMAIN}/g" "${SCRIPT_DIR}/server/pgrok-ask.service" > /etc/systemd/system/pgrok-ask.service
+    systemctl daemon-reload
+    systemctl enable pgrok-ask
+    systemctl restart pgrok-ask
+    success "Installed and started pgrok-ask service"
 
     # --- 5. Install pgrok-tunnel with correct domain ---
     TUNNEL_SCRIPT="/usr/local/bin/pgrok-tunnel"
@@ -256,9 +255,9 @@ SSHDEOF
         fi
     fi
 
-    # --- 8. Build and start Caddy ---
+    # --- 8. Start Caddy ---
     echo ""
-    info "Building Caddy Docker image (this may take a minute)..."
+    info "Starting Caddy (using stock image, no custom build needed)..."
     echo ""
 
     if (cd "$SERVER_DIR" && docker compose up -d --build) ; then
@@ -275,12 +274,11 @@ SSHDEOF
     echo ""
     echo -e "  ${BOLD}One manual step remaining — add DNS record:${NC}"
     echo ""
-    echo -e "  In your Cloudflare dashboard (dash.cloudflare.com → ${DOMAIN} → DNS):"
+    echo -e "  In your Vercel dashboard (vercel.com → Domains → ${DOMAIN} → DNS Records):"
     echo ""
     echo -e "    Type:  ${BOLD}A${NC}"
     echo -e "    Name:  ${BOLD}*${NC}"
     echo -e "    Value: ${BOLD}${VPS_IP:-<your-vps-ip>}${NC}"
-    echo -e "    Proxy: ${BOLD}DNS only (grey cloud)${NC}"
     echo ""
     echo -e "  Then run ${CYAN}./setup.sh client${NC} on your Mac."
     echo ""

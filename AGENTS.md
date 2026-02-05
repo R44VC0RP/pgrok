@@ -9,11 +9,12 @@
 ## Server (Caddy + Docker)
 
 - **`network_mode: host` is required** in `docker-compose.yml`. SSH tunnels bind to the host's `localhost`, which is unreachable from inside Docker's default bridge network. Without this, Caddy can see the route but can't reach the upstream.
-- **Caddy needs a custom build** for Cloudflare DNS support. The `Dockerfile` uses `xcaddy build --with github.com/caddy-dns/cloudflare` in a multi-stage build. The module isn't included in the official Caddy image.
 - **`caddy-dns/vercel` is broken and abandoned** (1 commit from 2021, never updated for `libdns` breaking API change). Do NOT use it. The `caddy-dns/cloudflare` module is actively maintained and is the correct choice. Env var: `CLOUDFLARE_API_TOKEN`.
 - **On-Demand TLS is the preferred approach** — uses stock Caddy (no custom build), provisions individual certs via HTTP-01 challenge as requests arrive. Requires a `pgrok-ask` endpoint to prevent cert abuse. No DNS provider module or API token needed.
+- **Caddy Admin API quirks with null routes**: When a Caddyfile creates a server with no routes (just on-demand TLS), the `routes` key is null/missing. `POST /config/apps/http/servers/srv0/routes` fails with "cannot unmarshal object into RouteList" 500 error. `PUT` to create it fails with 409 "key already exists" if routes were ever initialized. **Solution**: Use GET-modify-PATCH pattern: fetch existing routes (default to `[]` if GET fails), modify the array, then `PATCH` the entire array back. `PATCH` works whether the key exists or is null; `PUT` only works for creation.
+- **Caddy route evaluation order matters**: Routes are evaluated in array order. A catch-all route with no `match` condition (e.g., `respond 502`) placed first in the Caddyfile will match ALL requests before any dynamically-added routes can match by host. Solution: either omit catch-all routes entirely, or ensure they have specific match conditions that don't overlap with tunnel routes.
 - **Cloudflare proxy (orange cloud) must be OFF** for the wildcard A record. Caddy handles TLS termination directly — if Cloudflare proxies, it breaks the SSL handshake since Caddy expects to terminate TLS itself.
-- The Caddy admin API endpoint for adding routes is `POST /config/apps/http/servers/srv0/routes`. The `srv0` server name is Caddy's default when configured via Caddyfile. Deleting by ID uses `DELETE /id/<route-id>`.
+- The Caddy admin API `srv0` server name is Caddy's default when configured via Caddyfile. Deleting routes by ID uses `DELETE /id/<route-id>`.
 
 ## Server Script (`server/pgrok-tunnel`)
 
@@ -31,6 +32,8 @@
 
 - Remote port is deterministic: `10000 + (cksum of subdomain) % 50000`. This means the same subdomain always gets the same remote port, avoiding the need for port negotiation. Collision is theoretically possible but negligible for single-user.
 - The client uses `ssh -tt` (force pseudo-terminal allocation) so that the server-side `pgrok-tunnel` script receives a proper stdin that closes when the SSH connection drops.
+- **`ExitOnForwardFailure` was intentionally removed** from SSH options. With this flag, SSH exits entirely if the local port isn't listening when the tunnel starts. Removing it allows the tunnel to stay alive (like ngrok) — start/stop local services freely while the tunnel runs. Individual forwarded connections fail silently if nothing is local, but the SSH session persists.
+- Use `LogLevel=ERROR` to suppress noisy `connect_to localhost port XXXX: failed` messages from SSH when forwarded connections can't reach the local service.
 
 ## Setup Script (`setup.sh`)
 

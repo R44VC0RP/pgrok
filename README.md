@@ -2,7 +2,7 @@
 
 Personal ngrok alternative. Expose local ports to the internet with automatic HTTPS, an interactive TUI dashboard, and HTTP request inspection -- all through your own VPS.
 
-<img width="984" height="884" alt="image" src="https://github.com/user-attachments/assets/e28b2da4-23f3-4689-b1a6-d72bd53c3396" />
+<img width="1956" height="1900" alt="image" src="https://github.com/user-attachments/assets/277ef194-a135-407a-83a4-deaad4330dee" />
 
 ## Quick Start
 

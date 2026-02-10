@@ -15,7 +15,9 @@ import json
 import signal
 import atexit
 import socket
+import ssl
 import re
+import time
 import urllib.request
 import urllib.error
 
@@ -168,6 +170,46 @@ def remove_route(subdomain):
         pass
 
 
+def provision_cert(subdomain, timeout=90):
+    """Trigger on-demand TLS cert provisioning and wait for it to be ready.
+
+    Makes an HTTPS request to Caddy (via localhost) with the proper SNI hostname.
+    Caddy's on-demand TLS will ask pgrok-ask for approval, then obtain a
+    Let's Encrypt cert. We poll until the TLS handshake succeeds or we time out.
+
+    Returns True if cert is ready, False if timed out.
+    """
+    hostname = f"{subdomain}.{DOMAIN}"
+    deadline = time.time() + timeout
+    attempt = 0
+
+    while time.time() < deadline:
+        attempt += 1
+        try:
+            # Connect to Caddy on localhost:443, but set SNI to the tunnel hostname.
+            # This triggers on-demand cert provisioning if the cert doesn't exist.
+            ctx = ssl.create_default_context()
+            with socket.create_connection(("127.0.0.1", 443), timeout=10) as sock:
+                with ctx.wrap_socket(sock, server_hostname=hostname) as ssock:
+                    cert = ssock.getpeercert()
+                    if cert:
+                        return True
+        except ssl.SSLCertVerificationError:
+            # Cert exists but may be from staging CA or have issues — still means
+            # Caddy responded with *a* cert, so provisioning worked.
+            return True
+        except (ssl.SSLError, socket.timeout, ConnectionRefusedError, OSError):
+            # Cert not ready yet — Caddy is still obtaining it.
+            # First attempt may take a while (ACME challenge), subsequent ones are faster.
+            pass
+
+        # Exponential backoff: 2s, 3s, 4s, 5s, then cap at 5s
+        wait = min(2 + attempt, 5)
+        time.sleep(wait)
+
+    return False
+
+
 def handle_signal(signum, frame):
     """Handle termination signals gracefully."""
     sys.exit(0)
@@ -197,8 +239,20 @@ def main():
     add_route(subdomain, port)
 
     url = f"https://{subdomain}.{DOMAIN}"
+
+    # Trigger and wait for TLS cert provisioning
+    print(f"Provisioning TLS certificate for {subdomain}.{DOMAIN}...")
+    sys.stdout.flush()
+
+    if provision_cert(subdomain):
+        print(f"TLS certificate ready.")
+    else:
+        print(f"Warning: TLS certificate not yet ready (may provision on first request).")
+    sys.stdout.flush()
+
     print(f"pgrok tunnel active: {url}")
     print(f"  Forwarding to localhost:{port}")
+    print(f"  Press Ctrl+C to stop the tunnel.")
     sys.stdout.flush()
 
     # Block until the SSH connection drops (stdin closes)

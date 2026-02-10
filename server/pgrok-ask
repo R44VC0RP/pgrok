@@ -28,13 +28,18 @@ class AskHandler(BaseHTTPRequestHandler):
         domain = params.get("domain", [None])[0]
 
         if domain and domain.endswith(f".{DOMAIN}"):
-            # Valid subdomain of our tunnel domain — allow cert
-            self.send_response(200)
-            self.end_headers()
-        else:
-            # Unknown domain — deny cert issuance
-            self.send_response(403)
-            self.end_headers()
+            # Extract the prefix before .DOMAIN and only allow single-level
+            # subdomains. This blocks bot abuse like a.b.c.d.raavai.com
+            # which was exhausting Let's Encrypt rate limits.
+            prefix = domain[: -len(f".{DOMAIN}")]
+            if prefix and "." not in prefix:
+                self.send_response(200)
+                self.end_headers()
+                return
+
+        # Unknown domain or multi-level subdomain — deny cert issuance
+        self.send_response(403)
+        self.end_headers()
 
     def log_message(self, format, *args):
         # Suppress noisy access logs

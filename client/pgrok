@@ -131,7 +131,7 @@ echo ""
 echo -e "  ${CYAN}Tunnel:${NC}    ${FULL_URL}"
 echo -e "  ${CYAN}Forwards:${NC}  → localhost:${LOCAL_PORT}"
 echo ""
-echo -e "  Press ${BOLD}Ctrl+C${NC} to stop the tunnel."
+echo -e "  ${YELLOW}Connecting and provisioning TLS certificate...${NC}"
 echo ""
 
 # --- Handle Ctrl+C gracefully ---

@@ -80,15 +80,7 @@ Press `Ctrl+C` to stop. The route is cleaned up automatically.
 
 ## How it works
 
-```
-Browser -> https://myapp.yourdomain.com
-        -> DNS wildcard A record -> VPS
-        -> Caddy terminates TLS (on-demand cert via Let's Encrypt + ZeroSSL fallback)
-        -> Caddy reverse proxies to SSH tunnel port
-        -> SSH tunnel forwards to your Mac
-        -> local proxy (captures request logs for TUI)
-        -> localhost:4000
-```
+<img width="932" height="331" alt="image" src="https://github.com/user-attachments/assets/9d56fb43-bafe-4697-9c72-3e001a0c92aa" />
 
 - **Caddy** on the VPS handles HTTPS with on-demand TLS -- certs are auto-provisioned per subdomain. Falls back to ZeroSSL if Let's Encrypt is rate-limited.
 - **SSH reverse tunnels** carry traffic -- no extra tunnel software.

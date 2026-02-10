@@ -125,6 +125,7 @@ setup_server() {
     echo ""
 
     prompt DOMAIN "Your domain (e.g. example.com)"
+    prompt ACME_EMAIL "Email for SSL certificates (Let's Encrypt / ZeroSSL)"
 
     echo ""
     info "Your Mac's SSH public key is needed so the pgrok client can connect."
@@ -142,6 +143,7 @@ setup_server() {
     echo -e "  ${BOLD}Summary${NC}"
     echo -e "  ${DIM}────────────────────────────────────${NC}"
     echo -e "  Domain:     ${CYAN}*.${DOMAIN}${NC}"
+    echo -e "  Email:      ${CYAN}${ACME_EMAIL}${NC}"
     echo -e "  VPS IP:     ${CYAN}${VPS_IP:-unknown}${NC}"
     echo -e "  SSH key:    ${CYAN}${SSH_PUB_KEY:0:40}...${NC}"
     echo -e "  ${DIM}────────────────────────────────────${NC}"
@@ -167,20 +169,25 @@ setup_server() {
     success "Copied Docker files"
 
     # --- 3. Generate Caddyfile ---
-    cat > "${SERVER_DIR}/Caddyfile" << 'CADDYEOF'
+    cat > "${SERVER_DIR}/Caddyfile" << CADDYEOF
 {
 	on_demand_tls {
 		ask http://localhost:9123/check
 	}
+	email ${ACME_EMAIL}
 }
 
 https:// {
 	tls {
 		on_demand
+		issuer acme
+		issuer acme {
+			dir https://acme.zerossl.com/v2/DV90
+		}
 	}
 }
 CADDYEOF
-    success "Generated Caddyfile (on-demand TLS)"
+    success "Generated Caddyfile (on-demand TLS with Let's Encrypt + ZeroSSL fallback)"
 
     # --- 4. Install pgrok-ask service ---
     ASK_SCRIPT="/usr/local/bin/pgrok-ask"
@@ -287,92 +294,112 @@ SSHDEOF
 # ============================================================================
 setup_client() {
     banner
-    echo -e "  ${BOLD}Client Setup${NC}"
-    echo -e "  ${DIM}Run this on your Mac to install the pgrok command.${NC}"
-    echo ""
 
-    # --- Gather configuration ---
-    echo -e "  ${BOLD}Configuration${NC}"
-    echo ""
-
-    prompt PGROK_HOST "VPS hostname or IP address"
-    prompt PGROK_DOMAIN "Your domain (e.g. example.com)"
-    prompt PGROK_USER "SSH user on VPS" "pgrok"
-
-    # --- Detect SSH key ---
-    DEFAULT_KEY=""
-    for key_file in ~/.ssh/id_ed25519 ~/.ssh/id_rsa ~/.ssh/id_ecdsa; do
-        if [ -f "$key_file" ]; then
-            DEFAULT_KEY="$key_file"
-            break
-        fi
-    done
-
-    PGROK_SSH_KEY=""
-    if [ -n "$DEFAULT_KEY" ]; then
-        if prompt_yn "Use SSH key ${DEFAULT_KEY}?"; then
-            PGROK_SSH_KEY="$DEFAULT_KEY"
-        fi
+    REBUILD_MODE=false
+    if [ "${2:-}" = "--rebuild" ]; then
+        REBUILD_MODE=true
     fi
 
-    if [ -z "$PGROK_SSH_KEY" ]; then
-        echo ""
-        prompt PGROK_SSH_KEY "Path to SSH private key" "${DEFAULT_KEY}"
-    fi
-
-    echo ""
-
-    # --- Test SSH connection ---
-    if prompt_yn "Test SSH connection to ${PGROK_USER}@${PGROK_HOST}?" "y"; then
-        echo ""
-        info "Testing SSH connection..."
-
-        SSH_TEST_OPTS=(-o ConnectTimeout=10 -o BatchMode=yes)
-        if [ -n "$PGROK_SSH_KEY" ]; then
-            EXPANDED_KEY="${PGROK_SSH_KEY/#\~/$HOME}"
-            SSH_TEST_OPTS+=(-i "$EXPANDED_KEY")
-        fi
-
-        if ssh "${SSH_TEST_OPTS[@]}" "${PGROK_USER}@${PGROK_HOST}" "echo ok" &>/dev/null; then
-            success "SSH connection works"
-        else
-            warn "SSH connection failed. Make sure:"
-            warn "  1. The server setup is complete"
-            warn "  2. Your SSH key is in the pgrok user's authorized_keys"
-            warn "  3. The VPS hostname/IP is correct"
-            echo ""
-            if ! prompt_yn "Continue anyway?"; then
-                exit 1
-            fi
-        fi
-        echo ""
-    fi
-
-    # --- Summary ---
-    echo -e "  ${BOLD}Summary${NC}"
-    echo -e "  ${DIM}────────────────────────────────────${NC}"
-    echo -e "  VPS host:   ${CYAN}${PGROK_HOST}${NC}"
-    echo -e "  Domain:     ${CYAN}${PGROK_DOMAIN}${NC}"
-    echo -e "  SSH user:   ${CYAN}${PGROK_USER}${NC}"
-    echo -e "  SSH key:    ${CYAN}${PGROK_SSH_KEY:-default}${NC}"
-    echo -e "  ${DIM}────────────────────────────────────${NC}"
-    echo ""
-
-    if ! prompt_yn "Install pgrok?"; then
-        echo "  Aborted."
-        exit 0
-    fi
-
-    echo ""
-    echo -e "  ${BOLD}Installing...${NC}"
-    echo ""
-
-    # --- 1. Write config ---
     CONFIG_DIR="${HOME}/.pgrok"
     CONFIG_FILE="${CONFIG_DIR}/config"
-    mkdir -p "$CONFIG_DIR"
 
-    cat > "$CONFIG_FILE" << CFGEOF
+    # --- Rebuild mode: skip prompts, reuse existing config ---
+    if [ "$REBUILD_MODE" = true ]; then
+        echo -e "  ${BOLD}Rebuild Mode${NC}"
+        echo -e "  ${DIM}Rebuilding pgrok binary from existing config.${NC}"
+        echo ""
+
+        if [ ! -f "$CONFIG_FILE" ]; then
+            fail "No config found at ${CONFIG_FILE}. Run ./setup.sh client first (without --rebuild)."
+        fi
+
+        # shellcheck source=/dev/null
+        source "$CONFIG_FILE"
+        success "Loaded config from ${CONFIG_FILE}"
+        echo ""
+    else
+        echo -e "  ${BOLD}Client Setup${NC}"
+        echo -e "  ${DIM}Run this on your Mac to install the pgrok command.${NC}"
+        echo ""
+
+        # --- Gather configuration ---
+        echo -e "  ${BOLD}Configuration${NC}"
+        echo ""
+
+        prompt PGROK_HOST "VPS hostname or IP address"
+        prompt PGROK_DOMAIN "Your domain (e.g. example.com)"
+        prompt PGROK_USER "SSH user on VPS" "pgrok"
+
+        # --- Detect SSH key ---
+        DEFAULT_KEY=""
+        for key_file in ~/.ssh/id_ed25519 ~/.ssh/id_rsa ~/.ssh/id_ecdsa; do
+            if [ -f "$key_file" ]; then
+                DEFAULT_KEY="$key_file"
+                break
+            fi
+        done
+
+        PGROK_SSH_KEY=""
+        if [ -n "$DEFAULT_KEY" ]; then
+            if prompt_yn "Use SSH key ${DEFAULT_KEY}?"; then
+                PGROK_SSH_KEY="$DEFAULT_KEY"
+            fi
+        fi
+
+        if [ -z "$PGROK_SSH_KEY" ]; then
+            echo ""
+            prompt PGROK_SSH_KEY "Path to SSH private key" "${DEFAULT_KEY}"
+        fi
+
+        echo ""
+
+        # --- Test SSH connection ---
+        if prompt_yn "Test SSH connection to ${PGROK_USER}@${PGROK_HOST}?" "y"; then
+            echo ""
+            info "Testing SSH connection..."
+
+            SSH_TEST_OPTS=(-o ConnectTimeout=10 -o BatchMode=yes)
+            if [ -n "$PGROK_SSH_KEY" ]; then
+                EXPANDED_KEY="${PGROK_SSH_KEY/#\~/$HOME}"
+                SSH_TEST_OPTS+=(-i "$EXPANDED_KEY")
+            fi
+
+            if ssh "${SSH_TEST_OPTS[@]}" "${PGROK_USER}@${PGROK_HOST}" "echo ok" &>/dev/null; then
+                success "SSH connection works"
+            else
+                warn "SSH connection failed. Make sure:"
+                warn "  1. The server setup is complete"
+                warn "  2. Your SSH key is in the pgrok user's authorized_keys"
+                warn "  3. The VPS hostname/IP is correct"
+                echo ""
+                if ! prompt_yn "Continue anyway?"; then
+                    exit 1
+                fi
+            fi
+            echo ""
+        fi
+
+        # --- Summary ---
+        echo -e "  ${BOLD}Summary${NC}"
+        echo -e "  ${DIM}────────────────────────────────────${NC}"
+        echo -e "  VPS host:   ${CYAN}${PGROK_HOST}${NC}"
+        echo -e "  Domain:     ${CYAN}${PGROK_DOMAIN}${NC}"
+        echo -e "  SSH user:   ${CYAN}${PGROK_USER}${NC}"
+        echo -e "  SSH key:    ${CYAN}${PGROK_SSH_KEY:-default}${NC}"
+        echo -e "  ${DIM}────────────────────────────────────${NC}"
+        echo ""
+
+        if ! prompt_yn "Install pgrok?"; then
+            echo "  Aborted."
+            exit 0
+        fi
+
+        echo ""
+
+        # --- 1. Write config ---
+        mkdir -p "$CONFIG_DIR"
+
+        cat > "$CONFIG_FILE" << CFGEOF
 # pgrok client configuration
 # Generated by setup.sh on $(date)
 
@@ -381,12 +408,16 @@ PGROK_DOMAIN=${PGROK_DOMAIN}
 PGROK_USER=${PGROK_USER}
 CFGEOF
 
-    if [ -n "$PGROK_SSH_KEY" ]; then
-        echo "PGROK_SSH_KEY=${PGROK_SSH_KEY}" >> "$CONFIG_FILE"
+        if [ -n "$PGROK_SSH_KEY" ]; then
+            echo "PGROK_SSH_KEY=${PGROK_SSH_KEY}" >> "$CONFIG_FILE"
+        fi
+
+        chmod 600 "$CONFIG_FILE"
+        success "Wrote config to ${CONFIG_FILE}"
     fi
 
-    chmod 600 "$CONFIG_FILE"
-    success "Wrote config to ${CONFIG_FILE}"
+    echo -e "  ${BOLD}Installing...${NC}"
+    echo ""
 
     # --- 2. Build and install pgrok TUI client ---
     TUI_DIR="${SCRIPT_DIR}/client/tui"
@@ -449,7 +480,7 @@ case "${1:-}" in
         setup_server
         ;;
     client)
-        setup_client
+        setup_client "$@"
         ;;
     --version|-v)
         echo "pgrok v${VERSION}"

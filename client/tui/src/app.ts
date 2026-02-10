@@ -26,11 +26,12 @@ export async function createApp(): Promise<App> {
     useMouse: false, // Not needed for this dashboard
   })
 
-  // Create all panels
-  const header = createHeader()
-  const session = createSessionPanel()
-  const connections = createConnectionsPanel()
-  const requests = createRequestsPanel()
+  // Create all panels using the Renderable API (not constructs)
+  // so that property updates (.content, .fg) trigger re-renders.
+  const header = createHeader(renderer)
+  const session = createSessionPanel(renderer)
+  const connections = createConnectionsPanel(renderer)
+  const requests = createRequestsPanel(renderer)
 
   // Assemble layout: vertical stack
   renderer.root.add(header)
@@ -38,7 +39,11 @@ export async function createApp(): Promise<App> {
   renderer.root.add(connections.container)
   renderer.root.add(requests.container)
 
+  // Start the render loop for continuous updates
+  renderer.start()
+
   function destroy() {
+    renderer.stop()
     renderer.destroy()
   }
 

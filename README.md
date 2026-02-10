@@ -1,98 +1,137 @@
 # pgrok
 
-Personal ngrok alternative. Expose local ports to the internet with automatic HTTPS via your own VPS.
+Personal ngrok alternative. Expose local ports to the internet with automatic HTTPS, an interactive TUI dashboard, and HTTP request inspection — all through your own VPS.
 
 ```
-$ pgrok myapp 4000
+pgrok myapp 4000
 
-  pgrok
+pgrok                                                           (Ctrl+C to quit)
 
-  Tunnel:    https://myapp.yourdomain.com
-  Forwards:  → localhost:4000
+Session Status            online
+Version                   0.1.0
+Forwarding                https://myapp.yourdomain.com -> http://localhost:4000
+TLS Certificate           ready (Let's Encrypt)
 
-  Press Ctrl+C to stop the tunnel.
+Connections               ttl     opn     rt1     rt5     p50     p90
+                          12      1       0.15    0.20    0.01    0.02
+
+HTTP Requests
+────────────────────────────────────────────────────────────────────────────
+14:32:18.113  GET     /api/users                  200 OK               12ms
+14:32:17.891  POST    /api/login                  401 Unauthorized      8ms
+14:32:16.402  GET     /                           200 OK                3ms
 ```
 
 ## How it works
 
 ```
-Browser → https://myapp.yourdomain.com
-       → DNS wildcard A record → VPS
-       → Caddy terminates TLS (on-demand cert via Let's Encrypt)
-       → Caddy reverse proxies to SSH tunnel port
-       → SSH tunnel forwards to your Mac
-       → localhost:4000
+Browser -> https://myapp.yourdomain.com
+        -> DNS wildcard A record -> VPS
+        -> Caddy terminates TLS (on-demand cert via Let's Encrypt + ZeroSSL fallback)
+        -> Caddy reverse proxies to SSH tunnel port
+        -> SSH tunnel forwards to your Mac
+        -> local proxy (captures request logs for TUI)
+        -> localhost:4000
 ```
 
-**Caddy** on the VPS handles HTTPS with on-demand TLS — certs are auto-provisioned per subdomain via Let's Encrypt (HTTP-01 challenge). No DNS provider API tokens needed.
-**SSH reverse tunnels** carry traffic — no extra tunnel software.
-A small **Python script** on the server dynamically configures Caddy routes when tunnels connect/disconnect.
+- **Caddy** on the VPS handles HTTPS with on-demand TLS -- certs are auto-provisioned per subdomain. Falls back to ZeroSSL if Let's Encrypt is rate-limited.
+- **SSH reverse tunnels** carry traffic -- no extra tunnel software.
+- A small **Python script** on the server dynamically configures Caddy routes when tunnels connect/disconnect.
+- The **TUI client** (built with [OpenTUI](https://opentui.com)) provides a live dashboard with request inspection, connection stats, and color-coded HTTP logs.
 
 ## Quick Start
 
 ### 1. Server (on your VPS)
 
 ```bash
-git clone <this-repo> ~/pgrok
+git clone https://github.com/R44VC0RP/pgrok.git ~/pgrok
 cd ~/pgrok
 sudo ./setup.sh server
 ```
 
-The setup script will interactively ask for:
+You'll be prompted for:
 - Your domain name
+- An email for ACME cert registration
 - Your Mac's SSH public key
 
-It then automatically:
+The script automatically:
 - Starts stock Caddy via Docker (no custom build needed)
+- Configures on-demand TLS with Let's Encrypt + ZeroSSL fallback
 - Installs the `pgrok-ask` cert validation service
 - Installs the `pgrok-tunnel` route controller
 - Creates a `pgrok` SSH user with your key
 - Configures sshd for secure tunnel forwarding
 
-### 2. DNS (Vercel dashboard)
+### 2. DNS
 
-The setup script will print the exact DNS record to add. It's just one wildcard A record:
+Add one wildcard A record pointing to your VPS (the setup script prints the exact record):
 
 | Type | Name | Value |
 |------|------|-------|
 | A    | *    | `<your-vps-ip>` |
 
-This works with Vercel, Cloudflare, or any DNS provider. Just point `*.yourdomain.com` at your VPS.
+Works with any DNS provider (Vercel, Cloudflare, etc). Just point `*.yourdomain.com` at your VPS.
 
 ### 3. Client (on your Mac)
 
 ```bash
-cd ~/pgrok  # or wherever you cloned it
+cd ~/pgrok
 ./setup.sh client
 ```
 
-The setup script will ask for:
+You'll be prompted for:
 - VPS hostname/IP
 - Your domain
 - SSH user (defaults to `pgrok`)
 
-It then:
+The script:
 - Writes `~/.pgrok/config` with your settings
-- Installs the `pgrok` command to `/usr/local/bin`
+- Installs [Bun](https://bun.sh) if not present
+- Builds the pgrok TUI binary
+- Installs `pgrok` to `/usr/local/bin`
 - Optionally tests the SSH connection
+
+**Quick re-install** (skip prompts if config already exists):
+
+```bash
+./setup.sh client --rebuild
+```
 
 ## Usage
 
 ```bash
 # Expose a local dev server
 pgrok myapp 4000
-# → https://myapp.yourdomain.com
+# -> https://myapp.yourdomain.com
 
 # Expose an API
 pgrok api 3000
-# → https://api.yourdomain.com
+# -> https://api.yourdomain.com
 
 # Any subdomain works instantly
 pgrok staging 8080
-# → https://staging.yourdomain.com
+# -> https://staging.yourdomain.com
+
+# Debug mode -- dumps raw tunnel logs on exit
+pgrok myapp 4000 --print-logs
 ```
 
 Press `Ctrl+C` to stop. The route is cleaned up automatically.
+
+### TUI Dashboard
+
+The dashboard shows in real-time:
+
+- **Session Status** -- connecting / provisioning TLS / online / error
+- **Forwarding** -- your public URL and local port
+- **TLS Certificate** -- provisioning status (Let's Encrypt)
+- **Connection Stats** -- total requests, open connections, request rates (1m/5m), response time percentiles (p50/p90)
+- **HTTP Request Log** -- scrollable, color-coded log of every request through the tunnel
+
+Request log colors:
+- Methods: GET (blue), POST (purple), PUT/PATCH (yellow), DELETE (red)
+- Status: 2xx (green), 3xx (cyan), 4xx (yellow), 5xx (red)
+- Duration: <100ms (green), 100-500ms (yellow), >500ms (red)
 
 ## Project Structure
 
@@ -102,14 +141,22 @@ pgrok/
 ├── server/
 │   ├── Dockerfile            # Stock Caddy image
 │   ├── docker-compose.yml    # Caddy container config
-│   ├── Caddyfile             # On-demand TLS config
-│   ├── .env.example          # Environment variables template
+│   ├── Caddyfile             # On-demand TLS with LE + ZeroSSL fallback
 │   ├── pgrok-tunnel          # Server-side tunnel controller (Python)
 │   ├── pgrok-ask             # Cert validation endpoint (Python)
 │   ├── pgrok-ask.service     # Systemd unit for pgrok-ask
-│   └── setup-vps.sh          # Standalone server setup (alternative to setup.sh)
+│   └── setup-vps.sh          # Standalone server setup alternative
 ├── client/
-│   ├── pgrok                 # CLI script (bash)
+│   ├── tui/                  # TUI client (TypeScript + OpenTUI)
+│   │   ├── index.ts          # Entry point
+│   │   ├── package.json
+│   │   └── src/
+│   │       ├── app.ts        # OpenTUI renderer + layout
+│   │       ├── config.ts     # Config loader (~/.pgrok/config)
+│   │       ├── tunnel.ts     # SSH subprocess + message parser
+│   │       ├── proxy.ts      # Local reverse proxy for request logging
+│   │       ├── stats.ts      # Connection statistics tracker
+│   │       └── ui/           # UI panels (header, session, connections, requests)
 │   └── config.example        # Client config template
 └── README.md
 ```
@@ -123,20 +170,20 @@ pgrok/
 - Ports 80 and 443 open
 
 **Mac:**
-- SSH client (built-in)
+- [Bun](https://bun.sh) runtime (auto-installed by setup.sh if missing)
 - SSH key pair (`ssh-keygen` if you don't have one)
 
 **DNS:**
-- A wildcard A record `*.yourdomain.com` pointing to your VPS (any DNS provider)
+- A wildcard A record `*.yourdomain.com` pointing to your VPS
 
 ## How SSL Works
 
 1. A request arrives for `myapp.yourdomain.com`
 2. Caddy checks with `pgrok-ask` service: "Should I get a cert for this domain?"
-3. `pgrok-ask` verifies it matches `*.yourdomain.com` — responds 200
-4. Caddy uses HTTP-01 challenge to get a Let's Encrypt cert (automatic, no API tokens)
+3. `pgrok-ask` verifies it's a single-level subdomain of `*.yourdomain.com` (blocks `a.b.c.yourdomain.com` to prevent abuse)
+4. Caddy uses HTTP-01 challenge to get a cert -- tries Let's Encrypt first, falls back to ZeroSSL if rate-limited
 5. Cert is cached and auto-renewed
-6. First request has a brief delay (~2s) for cert provisioning; subsequent requests are instant
+6. The TUI client triggers cert provisioning during tunnel setup, so it's ready before you open the URL
 
 ## Security
 
@@ -144,13 +191,13 @@ pgrok/
 - Dedicated `pgrok` user with restricted SSH (remote forwarding only)
 - Caddy admin API only on localhost (not exposed externally)
 - SSH tunnels bind to localhost only (`GatewayPorts no`)
-- `pgrok-ask` prevents cert abuse — only allows certs for `*.yourdomain.com`
+- `pgrok-ask` prevents cert abuse -- only allows single-level subdomains of `*.yourdomain.com`
 
 ## Configuration
 
 ### Client (`~/.pgrok/config`)
 
-Generated by `setup.sh client`. You can edit it manually:
+Generated by `setup.sh client`. You can edit manually:
 
 ```bash
 PGROK_HOST=your-vps-ip
@@ -165,7 +212,7 @@ Files live in `/opt/pgrok/` after setup:
 
 | File | Purpose |
 |------|---------|
-| `Caddyfile` | On-demand TLS config |
+| `Caddyfile` | On-demand TLS config with LE + ZeroSSL |
 | `docker-compose.yml` | Caddy container |
 | `Dockerfile` | Stock Caddy image |
 
@@ -173,8 +220,8 @@ Scripts at `/usr/local/bin/`:
 
 | Script | Purpose |
 |--------|---------|
-| `pgrok-tunnel` | Manages Caddy routes (invoked by SSH) |
-| `pgrok-ask` | Validates cert requests (systemd service) |
+| `pgrok-tunnel` | Manages Caddy routes + provisions TLS certs (invoked by SSH) |
+| `pgrok-ask` | Validates cert requests, blocks multi-level subdomains (systemd service) |
 
 ## Troubleshooting
 
@@ -183,30 +230,42 @@ Scripts at `/usr/local/bin/`:
 - Check that your SSH public key matches what was provided during server setup
 - Try manually: `ssh pgrok@your-vps-ip`
 
-**"No active tunnel on {host}" in browser:**
-- The tunnel isn't running. Start it with `pgrok <subdomain> <port>`
-- If it was running, the SSH connection may have dropped
+**Stuck on "connecting" in the TUI:**
+- Run with `--print-logs` flag, press Ctrl+C, then check `/tmp/pgrok-debug.log`
+- Verify SSH can reach the server: `ssh pgrok@your-vps-ip echo ok`
+
+**Stuck on "provisioning TLS...":**
+- Let's Encrypt may be rate-limited (50 certs/week per domain). ZeroSSL fallback should handle this automatically.
+- Check Caddy logs: `docker compose logs caddy` in `/opt/pgrok`
+- Try a subdomain that already has a cert
 
 **SSL certificate errors:**
-- On first access, Caddy provisions the cert (~2 seconds). Retry after a moment.
-- Check Caddy logs: `docker compose logs caddy` in `/opt/pgrok`
 - Verify the `pgrok-ask` service is running: `systemctl status pgrok-ask`
 - Make sure ports 80 and 443 are open on the VPS firewall
+- Check that Cloudflare proxy (orange cloud) is OFF for the wildcard DNS record
 
 **"Port not yet reachable" warning:**
-- Usually harmless — SSH tunnel takes a moment to establish
-- If traffic doesn't work, check your local service is running
+- Usually harmless -- SSH tunnel takes a moment to establish
+- If traffic doesn't work, check your local service is running on the specified port
+
+## Development
+
+```bash
+# Run in dev mode (no build step)
+cd client/tui
+bun install
+bun run index.ts myapp 4000
+
+# Build standalone binary
+bun run build
+
+# Type-check
+bun run tsc --noEmit
+```
 
 ## Limitations
 
 - Single user (personal tool, not multi-tenant)
 - No automatic reconnection (restart `pgrok` if connection drops)
 - Stale routes possible on abrupt disconnection (self-heal on next connect to same subdomain)
-- First request to a new subdomain has ~2s delay for cert provisioning
-
-## Future Ideas
-
-- Go/Rust CLI with auto-reconnect
-- `pgrok list` — show active tunnels
-- `pgrok --auth user:pass` — basic auth on endpoints
-- Cleanup cron for stale routes
+- HTTP request logging only (WebSocket passthrough works but isn't logged)

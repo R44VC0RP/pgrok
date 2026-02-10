@@ -78,7 +78,7 @@ export function spawnTunnel(
 
   const sshArgs: string[] = [
     "ssh",
-    "-tt",
+    "-T", // No PTY — we read stdout as a pipe, not a terminal
     "-o",
     "ServerAliveInterval=30",
     "-o",
@@ -97,7 +97,9 @@ export function spawnTunnel(
     "-R",
     `${remotePort}:localhost:${targetPort}`,
     `${config.user}@${config.host}`,
-    `/usr/local/bin/pgrok-tunnel ${subdomain} ${remotePort}`
+    // PYTHONUNBUFFERED=1 forces Python to flush stdout immediately,
+    // which is needed since we're reading stdout as a pipe (no PTY).
+    `PYTHONUNBUFFERED=1 /usr/local/bin/pgrok-tunnel ${subdomain} ${remotePort}`
   )
 
   const callbacks: ((line: string) => void)[] = []

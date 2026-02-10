@@ -5,8 +5,10 @@ set -euo pipefail
 # pgrok setup — Interactive installer for personal ngrok alternative
 #
 # Usage:
-#   ./setup.sh server    Set up the VPS (run on your server)
-#   ./setup.sh client    Set up the Mac client (run on your Mac)
+#   ./setup.sh client                          Interactive client setup (run first)
+#   ./setup.sh client --rebuild                Rebuild binary from existing config
+#   ./setup.sh server                          Interactive server setup
+#   ./setup.sh server --domain X --email Y --ssh-key "Z"   Non-interactive server
 # ============================================================================
 
 VERSION="0.1.0"
@@ -48,22 +50,6 @@ prompt() {
     eval "$var_name=\"$value\""
 }
 
-prompt_secret() {
-    local var_name="$1"
-    local prompt_text="$2"
-    local value
-
-    echo -en "  ${BOLD}${prompt_text}${NC}: "
-    read -rs value
-    echo ""
-
-    if [ -z "$value" ]; then
-        fail "Value required."
-    fi
-
-    eval "$var_name=\"$value\""
-}
-
 prompt_yn() {
     local prompt_text="$1"
     local default="${2:-y}"
@@ -87,20 +73,52 @@ banner() {
     echo ""
 }
 
+# Copy text to clipboard (best-effort, silent fail)
+copy_to_clipboard() {
+    local text="$1"
+    if command -v pbcopy &>/dev/null; then
+        printf '%s' "$text" | pbcopy
+        return 0
+    elif command -v xclip &>/dev/null; then
+        printf '%s' "$text" | xclip -selection clipboard
+        return 0
+    elif command -v xsel &>/dev/null; then
+        printf '%s' "$text" | xsel --clipboard
+        return 0
+    fi
+    return 1
+}
+
 # ============================================================================
 # SERVER SETUP
 # ============================================================================
 setup_server() {
+    shift  # remove "server" from args
+
+    # --- Parse CLI flags ---
+    DOMAIN=""
+    ACME_EMAIL=""
+    SSH_PUB_KEY=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --domain)   DOMAIN="$2"; shift 2 ;;
+            --email)    ACME_EMAIL="$2"; shift 2 ;;
+            --ssh-key)  SSH_PUB_KEY="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
     banner
     echo -e "  ${BOLD}Server Setup${NC}"
-    echo -e "  ${DIM}Run this on your VPS to set up the tunnel server.${NC}"
+    echo -e "  ${DIM}Setting up the pgrok tunnel server on this VPS.${NC}"
     echo ""
 
     # --- Check prerequisites ---
     echo -e "  ${BOLD}Checking prerequisites...${NC}"
 
     if [ "$(id -u)" -ne 0 ]; then
-        fail "This script must be run as root (use sudo ./setup.sh server)"
+        fail "This script must be run as root (use sudo)"
     fi
 
     if ! command -v docker &>/dev/null; then
@@ -120,38 +138,50 @@ setup_server() {
 
     echo ""
 
-    # --- Gather configuration ---
+    # --- Gather configuration (prompt for anything not provided via flags) ---
     echo -e "  ${BOLD}Configuration${NC}"
     echo ""
 
-    prompt DOMAIN "Your domain (e.g. example.com)"
-    prompt ACME_EMAIL "Email for SSL certificates (Let's Encrypt / ZeroSSL)"
-
-    echo ""
-    info "Your Mac's SSH public key is needed so the pgrok client can connect."
-    info "Find it on your Mac with: cat ~/.ssh/id_ed25519.pub"
-    echo ""
-    prompt SSH_PUB_KEY "Mac SSH public key (paste the full line)"
-
-    VPS_IP=$(curl -s --connect-timeout 5 ifconfig.me 2>/dev/null || echo "")
-    echo ""
-    if [ -n "$VPS_IP" ]; then
-        info "Detected VPS IP: ${VPS_IP}"
+    if [ -z "$DOMAIN" ]; then
+        prompt DOMAIN "Your domain (e.g. example.com)"
+    else
+        success "Domain: ${DOMAIN}"
     fi
 
-    echo ""
-    echo -e "  ${BOLD}Summary${NC}"
-    echo -e "  ${DIM}────────────────────────────────────${NC}"
-    echo -e "  Domain:     ${CYAN}*.${DOMAIN}${NC}"
-    echo -e "  Email:      ${CYAN}${ACME_EMAIL}${NC}"
-    echo -e "  VPS IP:     ${CYAN}${VPS_IP:-unknown}${NC}"
-    echo -e "  SSH key:    ${CYAN}${SSH_PUB_KEY:0:40}...${NC}"
-    echo -e "  ${DIM}────────────────────────────────────${NC}"
-    echo ""
+    if [ -z "$ACME_EMAIL" ]; then
+        prompt ACME_EMAIL "Email for SSL certificates (Let's Encrypt / ZeroSSL)"
+    else
+        success "Email: ${ACME_EMAIL}"
+    fi
 
-    if ! prompt_yn "Proceed with installation?"; then
-        echo "  Aborted."
-        exit 0
+    if [ -z "$SSH_PUB_KEY" ]; then
+        echo ""
+        info "Your client's SSH public key is needed so pgrok can connect."
+        info "Find it on your Mac/Linux with: cat ~/.ssh/id_ed25519.pub"
+        echo ""
+        prompt SSH_PUB_KEY "Client SSH public key (paste the full line)"
+    else
+        success "SSH key: ${SSH_PUB_KEY:0:40}..."
+    fi
+
+    VPS_IP=$(curl -s --connect-timeout 5 ifconfig.me 2>/dev/null || echo "")
+
+    # --- Summary (only in interactive mode) ---
+    if [ -t 0 ]; then
+        echo ""
+        echo -e "  ${BOLD}Summary${NC}"
+        echo -e "  ${DIM}────────────────────────────────────${NC}"
+        echo -e "  Domain:     ${CYAN}*.${DOMAIN}${NC}"
+        echo -e "  Email:      ${CYAN}${ACME_EMAIL}${NC}"
+        echo -e "  VPS IP:     ${CYAN}${VPS_IP:-unknown}${NC}"
+        echo -e "  SSH key:    ${CYAN}${SSH_PUB_KEY:0:40}...${NC}"
+        echo -e "  ${DIM}────────────────────────────────────${NC}"
+        echo ""
+
+        if ! prompt_yn "Proceed with installation?"; then
+            echo "  Aborted."
+            exit 0
+        fi
     fi
 
     echo ""
@@ -194,7 +224,6 @@ CADDYEOF
     sed "s/yourdomain\.com/${DOMAIN}/g" "${SCRIPT_DIR}/server/pgrok-ask" > "$ASK_SCRIPT"
     chmod +x "$ASK_SCRIPT"
 
-    # Create systemd service for pgrok-ask
     sed "s/yourdomain\.com/${DOMAIN}/g" "${SCRIPT_DIR}/server/pgrok-ask.service" > /etc/systemd/system/pgrok-ask.service
     systemctl daemon-reload
     systemctl enable pgrok-ask
@@ -262,7 +291,7 @@ SSHDEOF
 
     # --- 8. Start Caddy ---
     echo ""
-    info "Starting Caddy (using stock image, no custom build needed)..."
+    info "Starting Caddy..."
     echo ""
 
     if (cd "$SERVER_DIR" && docker compose up -d --build) ; then
@@ -277,15 +306,10 @@ SSHDEOF
     echo ""
     echo -e "  ${BOLD}${GREEN}Server setup complete!${NC}"
     echo ""
-    echo -e "  ${BOLD}One manual step remaining — add DNS record:${NC}"
+    echo -e "  Go back to your Mac and run:"
     echo ""
-    echo -e "  In your Vercel dashboard (vercel.com → Domains → ${DOMAIN} → DNS Records):"
-    echo ""
-    echo -e "    Type:  ${BOLD}A${NC}"
-    echo -e "    Name:  ${BOLD}*${NC}"
-    echo -e "    Value: ${BOLD}${VPS_IP:-<your-vps-ip>}${NC}"
-    echo ""
-    echo -e "  Then run ${CYAN}./setup.sh client${NC} on your Mac."
+    echo -e "    ${CYAN}pgrok myapp 4000${NC}"
+    echo -e "    ${DIM}# → https://myapp.${DOMAIN} → localhost:4000${NC}"
     echo ""
 }
 
@@ -293,12 +317,25 @@ SSHDEOF
 # CLIENT SETUP
 # ============================================================================
 setup_client() {
-    banner
+    shift  # remove "client" from args
 
+    # --- Parse CLI flags ---
+    PGROK_HOST=""
+    PGROK_DOMAIN=""
+    PGROK_EMAIL=""
     REBUILD_MODE=false
-    if [ "${2:-}" = "--rebuild" ]; then
-        REBUILD_MODE=true
-    fi
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --server)   PGROK_HOST="$2"; shift 2 ;;
+            --domain)   PGROK_DOMAIN="$2"; shift 2 ;;
+            --email)    PGROK_EMAIL="$2"; shift 2 ;;
+            --rebuild)  REBUILD_MODE=true; shift ;;
+            *) shift ;;
+        esac
+    done
+
+    banner
 
     CONFIG_DIR="${HOME}/.pgrok"
     CONFIG_FILE="${CONFIG_DIR}/config"
@@ -310,7 +347,7 @@ setup_client() {
         echo ""
 
         if [ ! -f "$CONFIG_FILE" ]; then
-            fail "No config found at ${CONFIG_FILE}. Run ./setup.sh client first (without --rebuild)."
+            fail "No config found at ${CONFIG_FILE}. Run setup without --rebuild first."
         fi
 
         # shellcheck source=/dev/null
@@ -319,15 +356,31 @@ setup_client() {
         echo ""
     else
         echo -e "  ${BOLD}Client Setup${NC}"
-        echo -e "  ${DIM}Run this on your Mac to install the pgrok command.${NC}"
+        echo -e "  ${DIM}Install the pgrok command on your Mac/Linux.${NC}"
         echo ""
 
         # --- Gather configuration ---
         echo -e "  ${BOLD}Configuration${NC}"
         echo ""
 
-        prompt PGROK_HOST "VPS hostname or IP address"
-        prompt PGROK_DOMAIN "Your domain (e.g. example.com)"
+        if [ -z "$PGROK_HOST" ]; then
+            prompt PGROK_HOST "VPS hostname or IP address"
+        else
+            success "Server: ${PGROK_HOST}"
+        fi
+
+        if [ -z "$PGROK_DOMAIN" ]; then
+            prompt PGROK_DOMAIN "Your domain (e.g. example.com)"
+        else
+            success "Domain: ${PGROK_DOMAIN}"
+        fi
+
+        if [ -z "$PGROK_EMAIL" ]; then
+            prompt PGROK_EMAIL "Email for SSL certificates"
+        else
+            success "Email: ${PGROK_EMAIL}"
+        fi
+
         prompt PGROK_USER "SSH user on VPS" "pgrok"
 
         # --- Detect SSH key ---
@@ -351,41 +404,26 @@ setup_client() {
             prompt PGROK_SSH_KEY "Path to SSH private key" "${DEFAULT_KEY}"
         fi
 
-        echo ""
-
-        # --- Test SSH connection ---
-        if prompt_yn "Test SSH connection to ${PGROK_USER}@${PGROK_HOST}?" "y"; then
-            echo ""
-            info "Testing SSH connection..."
-
-            SSH_TEST_OPTS=(-o ConnectTimeout=10 -o BatchMode=yes)
-            if [ -n "$PGROK_SSH_KEY" ]; then
-                EXPANDED_KEY="${PGROK_SSH_KEY/#\~/$HOME}"
-                SSH_TEST_OPTS+=(-i "$EXPANDED_KEY")
-            fi
-
-            if ssh "${SSH_TEST_OPTS[@]}" "${PGROK_USER}@${PGROK_HOST}" "echo ok" &>/dev/null; then
-                success "SSH connection works"
-            else
-                warn "SSH connection failed. Make sure:"
-                warn "  1. The server setup is complete"
-                warn "  2. Your SSH key is in the pgrok user's authorized_keys"
-                warn "  3. The VPS hostname/IP is correct"
-                echo ""
-                if ! prompt_yn "Continue anyway?"; then
-                    exit 1
-                fi
-            fi
-            echo ""
+        # Read the public key for the server command
+        EXPANDED_KEY="${PGROK_SSH_KEY/#\~/$HOME}"
+        PUB_KEY_FILE="${EXPANDED_KEY}.pub"
+        if [ -f "$PUB_KEY_FILE" ]; then
+            SSH_PUB_KEY=$(cat "$PUB_KEY_FILE")
+        else
+            warn "Could not find public key at ${PUB_KEY_FILE}"
+            prompt SSH_PUB_KEY "Paste your SSH public key"
         fi
+
+        echo ""
 
         # --- Summary ---
         echo -e "  ${BOLD}Summary${NC}"
         echo -e "  ${DIM}────────────────────────────────────${NC}"
         echo -e "  VPS host:   ${CYAN}${PGROK_HOST}${NC}"
         echo -e "  Domain:     ${CYAN}${PGROK_DOMAIN}${NC}"
+        echo -e "  Email:      ${CYAN}${PGROK_EMAIL}${NC}"
         echo -e "  SSH user:   ${CYAN}${PGROK_USER}${NC}"
-        echo -e "  SSH key:    ${CYAN}${PGROK_SSH_KEY:-default}${NC}"
+        echo -e "  SSH key:    ${CYAN}${PGROK_SSH_KEY}${NC}"
         echo -e "  ${DIM}────────────────────────────────────${NC}"
         echo ""
 
@@ -459,16 +497,40 @@ CFGEOF
 
     # --- Done ---
     echo ""
-    echo -e "  ${BOLD}${GREEN}Client setup complete!${NC}"
+    echo -e "  ${BOLD}${GREEN}Client installed!${NC}"
     echo ""
-    echo -e "  ${BOLD}Usage:${NC}"
-    echo ""
-    echo -e "    ${CYAN}pgrok myapp 4000${NC}"
-    echo -e "    ${DIM}# → https://myapp.${PGROK_DOMAIN} → localhost:4000${NC}"
-    echo ""
-    echo -e "    ${CYAN}pgrok api 3000${NC}"
-    echo -e "    ${DIM}# → https://api.${PGROK_DOMAIN} → localhost:3000${NC}"
-    echo ""
+
+    # --- Print server setup command (skip in rebuild mode) ---
+    if [ "$REBUILD_MODE" = false ]; then
+        INSTALL_URL="https://raw.githubusercontent.com/R44VC0RP/pgrok/main/install.sh"
+
+        # Build the server command
+        SERVER_CMD="curl -fsSL ${INSTALL_URL} | sudo bash -s server --domain ${PGROK_DOMAIN} --email ${PGROK_EMAIL} --ssh-key \"${SSH_PUB_KEY}\""
+
+        echo -e "  ${BOLD}Next: set up your server.${NC}"
+        echo -e "  ${DIM}SSH into your VPS and paste this command:${NC}"
+        echo ""
+
+        # Try to copy to clipboard
+        if copy_to_clipboard "$SERVER_CMD"; then
+            echo -e "  ${GREEN}✓ Copied to clipboard!${NC}"
+            echo ""
+        fi
+
+        echo -e "  ${CYAN}${SERVER_CMD}${NC}"
+        echo ""
+        echo -e "  ${DIM}After the server is set up, come back and run:${NC}"
+        echo ""
+        echo -e "    ${CYAN}pgrok myapp 4000${NC}"
+        echo -e "    ${DIM}# → https://myapp.${PGROK_DOMAIN} → localhost:4000${NC}"
+        echo ""
+    else
+        echo -e "  ${BOLD}Usage:${NC}"
+        echo ""
+        echo -e "    ${CYAN}pgrok myapp 4000${NC}"
+        echo -e "    ${DIM}# → https://myapp.${PGROK_DOMAIN:-yourdomain.com} → localhost:4000${NC}"
+        echo ""
+    fi
 }
 
 # ============================================================================
@@ -477,7 +539,7 @@ CFGEOF
 
 case "${1:-}" in
     server)
-        setup_server
+        setup_server "$@"
         ;;
     client)
         setup_client "$@"
@@ -489,8 +551,8 @@ case "${1:-}" in
         banner
         echo -e "  ${BOLD}Usage:${NC}"
         echo ""
+        echo -e "    ${CYAN}./setup.sh client${NC}    Install the Mac/Linux client (run first)"
         echo -e "    ${CYAN}./setup.sh server${NC}    Set up the VPS tunnel server"
-        echo -e "    ${CYAN}./setup.sh client${NC}    Install the Mac client"
         echo ""
         exit 1
         ;;

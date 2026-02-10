@@ -4,33 +4,16 @@ Personal ngrok alternative. Expose local ports to the internet with automatic HT
 
 <img width="984" height="884" alt="image" src="https://github.com/user-attachments/assets/e28b2da4-23f3-4689-b1a6-d72bd53c3396" />
 
-## How it works
-
-```
-Browser -> https://myapp.yourdomain.com
-        -> DNS wildcard A record -> VPS
-        -> Caddy terminates TLS (on-demand cert via Let's Encrypt + ZeroSSL fallback)
-        -> Caddy reverse proxies to SSH tunnel port
-        -> SSH tunnel forwards to your Mac
-        -> local proxy (captures request logs for TUI)
-        -> localhost:4000
-```
-
-- **Caddy** on the VPS handles HTTPS with on-demand TLS -- certs are auto-provisioned per subdomain. Falls back to ZeroSSL if Let's Encrypt is rate-limited.
-- **SSH reverse tunnels** carry traffic -- no extra tunnel software.
-- A small **Python script** on the server dynamically configures Caddy routes when tunnels connect/disconnect.
-- The **TUI client** (built with [OpenTUI](https://opentui.com)) provides a live dashboard with request inspection, connection stats, and color-coded HTTP logs.
-
 ## Quick Start
 
 ### Prerequisites
 
-- A **VPS** (any provider) with ports 80 and 443 open
+- A **VPS** (any provider) with ports 80 and 443 open (nothing else running on them for now)
 - **Docker** + **Docker Compose** on the VPS
 - A **domain name** you control
-- An **SSH key** on your Mac/Linux (`ssh-keygen` if you don't have one)
+- An **SSH key** on your Mac/Linux (You can run `ssh-keygen` to generate one if you don't have one)
 
-### 1. DNS -- Point your domain at the VPS
+### 1. DNS Setup: Point your domain at the VPS
 
 Add a wildcard A record with your DNS provider (Cloudflare, Vercel, Namecheap, etc):
 
@@ -38,13 +21,15 @@ Add a wildcard A record with your DNS provider (Cloudflare, Vercel, Namecheap, e
 |------|------|-------|
 | A    | *    | `<your-vps-ip>` |
 
-### 2. Client -- Install on your Mac/Linux (run this first)
+### 2. Client Setup: Install on your Mac/Linux (run this first)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/R44VC0RP/pgrok/main/install.sh | bash -s client
 ```
 
-You'll be prompted for your VPS IP, domain, and email. The installer:
+(if you have a windows machine, and you get this running, please open a PR!)
+
+You'll be prompted for your VPS IP, domain, and email. The installer will:
 - Auto-detects your SSH key
 - Builds and installs the `pgrok` command
 - **Copies a server setup command to your clipboard** (with your SSH key embedded)
@@ -92,6 +77,23 @@ Press `Ctrl+C` to stop. The route is cleaned up automatically.
 ```bash
 ./setup.sh client --rebuild
 ```
+
+## How it works
+
+```
+Browser -> https://myapp.yourdomain.com
+        -> DNS wildcard A record -> VPS
+        -> Caddy terminates TLS (on-demand cert via Let's Encrypt + ZeroSSL fallback)
+        -> Caddy reverse proxies to SSH tunnel port
+        -> SSH tunnel forwards to your Mac
+        -> local proxy (captures request logs for TUI)
+        -> localhost:4000
+```
+
+- **Caddy** on the VPS handles HTTPS with on-demand TLS -- certs are auto-provisioned per subdomain. Falls back to ZeroSSL if Let's Encrypt is rate-limited.
+- **SSH reverse tunnels** carry traffic -- no extra tunnel software.
+- A small **Python script** on the server dynamically configures Caddy routes when tunnels connect/disconnect.
+- The **TUI client** (built with [OpenTUI](https://opentui.com)) provides a live dashboard with request inspection, connection stats, and color-coded HTTP logs.
 
 ### TUI Dashboard
 
@@ -182,3 +184,11 @@ bun run tsc --noEmit            # type-check
 - No automatic reconnection (restart `pgrok` if connection drops)
 - Stale routes possible on abrupt disconnection (self-heal on next connect)
 - HTTP request logging only (WebSocket passthrough works but isn't logged)
+
+## CONTRIBUTING
+
+We welcome contributions! Please open an issue or PR.
+
+## LICENSE
+
+MIT

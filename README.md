@@ -2,25 +2,7 @@
 
 Personal ngrok alternative. Expose local ports to the internet with automatic HTTPS, an interactive TUI dashboard, and HTTP request inspection — all through your own VPS.
 
-```
-pgrok myapp 4000
-
-pgrok                                                           (Ctrl+C to quit)
-
-Session Status            online
-Version                   0.1.0
-Forwarding                https://myapp.yourdomain.com -> http://localhost:4000
-TLS Certificate           ready (Let's Encrypt)
-
-Connections               ttl     opn     rt1     rt5     p50     p90
-                          12      1       0.15    0.20    0.01    0.02
-
-HTTP Requests
-────────────────────────────────────────────────────────────────────────────
-14:32:18.113  GET     /api/users                  200 OK               12ms
-14:32:17.891  POST    /api/login                  401 Unauthorized      8ms
-14:32:16.402  GET     /                           200 OK                3ms
-```
+<img width="984" height="884" alt="image" src="https://github.com/user-attachments/assets/e28b2da4-23f3-4689-b1a6-d72bd53c3396" />
 
 ## How it works
 

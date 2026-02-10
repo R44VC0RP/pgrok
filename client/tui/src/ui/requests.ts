@@ -44,6 +44,7 @@ function durationColor(ms: number): string {
 
 export interface RequestsPanel {
   container: BoxRenderable
+  scrollBox: ScrollBoxRenderable
   addRequest: (req: HttpRequest) => void
 }
 
@@ -83,7 +84,7 @@ export function createRequestsPanel(renderer: CliRenderer): RequestsPanel {
     width: "100%",
     flexGrow: 1,
     stickyScroll: true,
-    stickyStart: "bottom",
+    stickyStart: "top", // Newest at top, stays pinned there
     viewportCulling: true,
     contentOptions: {
       flexDirection: "column",
@@ -128,17 +129,18 @@ export function createRequestsPanel(renderer: CliRenderer): RequestsPanel {
       height: 1,
     })
 
-    scrollBox.content.add(line)
+    // Insert at top (index 0) so newest requests appear first
+    scrollBox.content.add(line, 0)
 
-    // Trim old entries
+    // Trim oldest entries (now at the end)
     const children = scrollBox.content.getChildren()
     while (children.length > MAX_REQUESTS) {
-      const first = children.shift()
-      if (first && first.id) {
-        scrollBox.content.remove(first.id)
+      const last = children.pop()
+      if (last && last.id) {
+        scrollBox.content.remove(last.id)
       }
     }
   }
 
-  return { container, addRequest }
+  return { container, scrollBox, addRequest }
 }

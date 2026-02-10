@@ -23,7 +23,6 @@ export async function createApp(): Promise<App> {
   const renderer = await createCliRenderer({
     useAlternateScreen: true,
     exitOnCtrlC: false, // We handle Ctrl+C ourselves for cleanup
-    useMouse: false, // Not needed for this dashboard
   })
 
   // Create all panels using the Renderable API (not constructs)
@@ -38,6 +37,9 @@ export async function createApp(): Promise<App> {
   renderer.root.add(session.container)
   renderer.root.add(connections.container)
   renderer.root.add(requests.container)
+
+  // Focus the scroll box so it receives keyboard/mouse scroll input
+  requests.scrollBox.focus()
 
   // Start the render loop for continuous updates
   renderer.start()

@@ -388,17 +388,40 @@ CFGEOF
     chmod 600 "$CONFIG_FILE"
     success "Wrote config to ${CONFIG_FILE}"
 
-    # --- 2. Install pgrok command ---
+    # --- 2. Build and install pgrok TUI client ---
+    TUI_DIR="${SCRIPT_DIR}/client/tui"
+
+    if ! command -v bun &>/dev/null; then
+        info "Bun is required for the pgrok TUI client."
+        info "Installing Bun..."
+        curl -fsSL https://bun.sh/install | bash
+        export PATH="$HOME/.bun/bin:$PATH"
+        if ! command -v bun &>/dev/null; then
+            fail "Failed to install Bun. Install manually: https://bun.sh"
+        fi
+        success "Bun installed"
+    else
+        success "Bun $(bun --version) found"
+    fi
+
+    info "Installing dependencies..."
+    (cd "$TUI_DIR" && bun install --frozen-lockfile 2>/dev/null || bun install)
+    success "Dependencies installed"
+
+    info "Building pgrok binary..."
+    (cd "$TUI_DIR" && bun build --compile --target=bun index.ts --outfile pgrok)
+    success "Built pgrok binary"
+
     INSTALL_DIR="/usr/local/bin"
     PGROK_BIN="${INSTALL_DIR}/pgrok"
 
     if [ -w "$INSTALL_DIR" ]; then
-        cp "${SCRIPT_DIR}/client/pgrok" "$PGROK_BIN"
+        cp "${TUI_DIR}/pgrok" "$PGROK_BIN"
         chmod +x "$PGROK_BIN"
         success "Installed pgrok to ${PGROK_BIN}"
     else
         info "Need sudo to install to ${INSTALL_DIR}"
-        sudo cp "${SCRIPT_DIR}/client/pgrok" "$PGROK_BIN"
+        sudo cp "${TUI_DIR}/pgrok" "$PGROK_BIN"
         sudo chmod +x "$PGROK_BIN"
         success "Installed pgrok to ${PGROK_BIN}"
     fi

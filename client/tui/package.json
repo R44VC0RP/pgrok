@@ -1,0 +1,16 @@
+{
+  "name": "pgrok",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run index.ts",
+    "build": "bun build --compile --target=bun index.ts --outfile pgrok"
+  },
+  "dependencies": {
+    "@opentui/core": "^0.1.76"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.7"
+  }
+}

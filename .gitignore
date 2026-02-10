@@ -4,3 +4,12 @@ server/.env
 
 # macOS
 .DS_Store
+
+# Node/Bun
+client/tui/node_modules/
+client/tui/bun.lock
+client/tui/dist/
+client/tui/pgrok
+
+# OpenCode
+.opencode/

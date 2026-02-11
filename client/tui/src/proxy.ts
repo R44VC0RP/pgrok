@@ -49,11 +49,18 @@ export function startProxy(
           durationMs,
         })
 
-        // Return the response to the caller (Caddy -> SSH tunnel -> here)
+        // Strip Content-Encoding and Content-Length headers.
+        // Bun's fetch() auto-decompresses gzip/br responses, so the body
+        // is already decoded — but the original headers still say "gzip".
+        // Forwarding those causes ERR_CONTENT_DECODING_FAILED in browsers.
+        const headers = new Headers(resp.headers)
+        headers.delete("content-encoding")
+        headers.delete("content-length")
+
         return new Response(resp.body, {
           status: resp.status,
           statusText: resp.statusText,
-          headers: resp.headers,
+          headers,
         })
       } catch {
         const durationMs = performance.now() - start

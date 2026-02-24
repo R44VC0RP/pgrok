@@ -48,16 +48,47 @@ export function parseTunnelMessage(
   return state
 }
 
+// --- POSIX CRC-32 cksum (pure TypeScript, matches Unix `cksum` command) ---
+
+const CRC_TABLE = /* @__PURE__ */ (() => {
+  const table = new Uint32Array(256)
+  for (let i = 0; i < 256; i++) {
+    let crc = i << 24
+    for (let j = 0; j < 8; j++) {
+      crc = crc & 0x80000000 ? (crc << 1) ^ 0x04c11db7 : crc << 1
+    }
+    table[i] = crc >>> 0
+  }
+  return table
+})()
+
+/**
+ * POSIX cksum: CRC-32 with length appended, then complemented.
+ * Produces identical output to `printf '%s' "str" | cksum`.
+ */
+export function posixCksum(input: string): number {
+  const bytes = new TextEncoder().encode(input)
+  let crc = 0
+
+  // Process each byte
+  for (const b of bytes) {
+    crc = ((crc << 8) ^ CRC_TABLE[((crc >>> 24) ^ b) & 0xff]) >>> 0
+  }
+
+  // Append the byte count (as variable-length little-endian bytes per POSIX spec)
+  let len = bytes.length
+  while (len > 0) {
+    crc = ((crc << 8) ^ CRC_TABLE[((crc >>> 24) ^ (len & 0xff)) & 0xff]) >>> 0
+    len = Math.floor(len / 256)
+  }
+
+  return (~crc >>> 0)
+}
+
 // --- Port computation (must match bash client's cksum) ---
 
 export function computeRemotePort(subdomain: string): number {
-  const result = Bun.spawnSync([
-    "sh",
-    "-c",
-    `printf '%s' "${subdomain}" | cksum`,
-  ])
-  const output = result.stdout.toString().trim()
-  const hash = parseInt(output.split(/\s+/)[0], 10)
+  const hash = posixCksum(subdomain)
   return 10000 + (hash % 50000)
 }
 

@@ -170,7 +170,7 @@ bun run tsc --noEmit            # type-check
 ## Limitations
 
 - Single user (personal tool, not multi-tenant)
-- Windows requires SSH (OpenSSH is built into Windows 10+)
+- Windows requires SSH (OpenSSH client is available on Windows 10+; ensure it's installed/enabled)
 - No automatic reconnection (restart `pgrok` if connection drops)
 - Stale routes possible on abrupt disconnection (self-heal on next connect)
 - HTTP request logging only (WebSocket passthrough works but isn't logged)

@@ -75,7 +75,7 @@ export function posixCksum(input: string): number {
     crc = ((crc << 8) ^ CRC_TABLE[((crc >>> 24) ^ b) & 0xff]) >>> 0
   }
 
-  // Append the byte count (as variable-length big-endian bytes per POSIX spec)
+  // Append the byte count (as variable-length little-endian bytes per POSIX spec)
   let len = bytes.length
   while (len > 0) {
     crc = ((crc << 8) ^ CRC_TABLE[((crc >>> 24) ^ (len & 0xff)) & 0xff]) >>> 0

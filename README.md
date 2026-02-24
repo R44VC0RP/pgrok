@@ -11,7 +11,7 @@ Personal ngrok alternative. Expose local ports to the internet with automatic HT
 - A **VPS** (any provider) with ports 80 and 443 open (nothing else running on them for now)
 - **Docker** + **Docker Compose** on the VPS
 - A **domain name** you control
-- An **SSH key** on your Mac/Linux (You can run `ssh-keygen` to generate one if you don't have one)
+- An **SSH key** on your machine (You can run `ssh-keygen` to generate one if you don't have one)
 
 ### 1. DNS Setup: Point your domain at the VPS
 
@@ -21,13 +21,11 @@ Add a wildcard A record with your DNS provider (Cloudflare, Vercel, Namecheap, e
 |------|------|-------|
 | A    | *    | `<your-vps-ip>` |
 
-### 2. Client Setup: Install on your Mac/Linux (run this first)
+### 2. Client Setup: Install the client (run this first)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/R44VC0RP/pgrok/main/install.sh | bash -s client
 ```
-
-(if you have a windows machine, and you get this running, please open a PR!)
 
 You'll be prompted for your VPS IP, domain, and email. The installer will:
 - Auto-detects your SSH key
@@ -172,7 +170,7 @@ bun run tsc --noEmit            # type-check
 ## Limitations
 
 - Single user (personal tool, not multi-tenant)
-- Mac and Linux only (no Windows)
+- Windows requires SSH (OpenSSH is built into Windows 10+)
 - No automatic reconnection (restart `pgrok` if connection drops)
 - Stale routes possible on abrupt disconnection (self-heal on next connect)
 - HTTP request logging only (WebSocket passthrough works but isn't logged)

@@ -181,4 +181,6 @@ function cleanup() {
 
 // Also handle signals
 process.on("SIGINT", cleanup)
-process.on("SIGTERM", cleanup)
+if (process.platform !== "win32") {
+  process.on("SIGTERM", cleanup)
+}
